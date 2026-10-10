@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>地下蚁国 · 蚁群图鉴</title>
+<style>
+  body{margin:0;background:#0d0b09;color:#cfc6bb;font:14px/1.6 monospace}
+  .wrap{max-width:1080px;margin:0 auto;padding:14px 16px 40px}
+  h1{font-size:18px;color:#e8d5a3;margin:8px 0 2px}
+  h2{font-size:15px;color:#e8d5a3;border-bottom:1px solid #333;padding-bottom:4px;margin:24px 0 12px}
+  .nav{margin:4px 0 6px;font-size:13px}
+  .nav a{color:#ffb020;text-decoration:none}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+  .card{background:#161210;border:1px solid #2a2420;border-radius:6px;padding:10px;text-align:center}
+  .card canvas{image-rendering:pixelated;background:#0d0b09;border-radius:4px}
+  .card .name{color:#ffb020;font-weight:bold;margin-top:8px}
+  .card .desc{color:#8a8078;font-size:12px;line-height:1.5}
+  .flow{display:flex;align-items:stretch;gap:10px;flex-wrap:wrap}
+  .flow .arrow{align-self:center;color:#666;font-size:20px}
+  .flow .card{flex:1 1 150px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>地下蚁国 · 蚁群图鉴</h1>
+  <div class="nav"><a href="/">← 返回主界面（实时模拟）</a></div>
+
+  <h2>阶级</h2>
+  <div class="grid">
+    <div class="card"><canvas id="c-worker" width="140" height="70"></canvas><div class="name">工蚁 Worker</div><div class="desc">觅食 · 掘隧道 · 育幼 · 维护<br>数量最多，寿命最短</div></div>
+    <div class="card"><canvas id="c-soldier" width="140" height="70"></canvas><div class="name">兵蚁 Soldier</div><div class="desc">宽头巨颚，守卫/巡逻<br>寿命 ≈ 3× 工蚁</div></div>
+    <div class="card"><canvas id="c-queen" width="140" height="70"></canvas><div class="name">蚁后 Queen</div><div class="desc">产卵（睡眠时暂停）<br>近似不朽，群落存续核心</div></div>
+  </div>
+
+  <h2>行为状态</h2>
+  <div class="grid">
+    <div class="card"><canvas id="s-forage" width="140" height="70"></canvas><div class="name">觅食 / 搬运</div><div class="desc">地表取食，衔粮回巢</div></div>
+    <div class="card"><canvas id="s-build" width="140" height="70"></canvas><div class="name">掘隧道</div><div class="desc">builder 挖主通道与巢室</div></div>
+    <div class="card"><canvas id="s-maint" width="140" height="70"></canvas><div class="name">维护蚁</div><div class="desc">绿圈：巡查、修复塌陷巢格</div></div>
+    <div class="card"><canvas id="s-rest" width="140" height="70"></canvas><div class="name">睡觉</div><div class="desc">zzz：累了回睡室歇脚</div></div>
+  </div>
+
+  <h2>生命周期（时长比 卵:幼虫:蛹 = 1:2:1.5）</h2>
+  <div class="flow">
+    <div class="card"><canvas id="l-egg" width="140" height="70"></canvas><div class="name">卵</div><div class="desc">不吃 · 最短<br>~200 tick</div></div>
+    <div class="arrow">→</div>
+    <div class="card"><canvas id="l-larva" width="140" height="70"></canvas><div class="name">幼虫</div><div class="desc">吃粮 · 连饿 3 顿死<br>~400 tick</div></div>
+    <div class="arrow">→</div>
+    <div class="card"><canvas id="l-pupa" width="140" height="70"></canvas><div class="name">蛹</div><div class="desc">不吃 · 羽化定阶级(25%兵)<br>~300 tick</div></div>
+    <div class="arrow">→</div>
+    <div class="card"><canvas id="l-adult" width="140" height="70"></canvas><div class="name">成虫</div><div class="desc">工/兵 出茧<br>寿命 工:兵 ≈ 1:3</div></div>
+  </div>
+
+  <h2>巢室分区</h2>
+  <div class="grid">
+    <div class="card"><div class="name" style="margin-top:2px">主厅</div><div class="desc">蚁后所在，中央枢纽，连通各室</div></div>
+    <div class="card"><div class="name" style="margin-top:2px">育虫室</div><div class="desc">卵/幼虫/蛹 发育，占格有体积</div></div>
+    <div class="card"><div class="name" style="margin-top:2px">储粮室 ×多</div><div class="desc">多间粮仓分担存粮，搬运蚁总去最空的那间，容量 = 格数 × 8</div></div>
+    <div class="card"><div class="name" style="margin-top:2px">睡室 ×多</div><div class="desc">多间歇脚区，累了的蚂蚁去人最少的那间（不睡蚁后主厅）</div></div>
+  </div>
+</div>
+<script src="ants.js"></script>
+<script>
+initAnts();
+const TAU=Math.PI*2;
+function C(id){const c=document.getElementById(id);return [c,c.getContext("2d"),c.width/2,c.height/2];}
+// 阶级
+{const[c,g,cx,cy]=C("c-worker");g.drawImage(SPRITES.worker[0].move,cx-45,cy-21,90,42);}
+{const[c,g,cx,cy]=C("c-soldier");g.drawImage(SPRITES.soldier[0].move,cx-54,cy-24,108,48);}
+{const[c,g,cx,cy]=C("c-queen");g.drawImage(SPRITES.queen[0],cx-57,cy-25,114,50);}
+// 行为状态
+{const[c,g,cx,cy]=C("s-forage");g.drawImage(SPRITES.worker[0].carry,cx-45,cy-21,90,42);}
+{const[c,g,cx,cy]=C("s-build");g.drawImage(SPRITES.worker[0].move,cx-45,cy-21,90,42);g.fillStyle="#75582f";g.fillRect(cx+34,cy-5,18,10);g.fillStyle="#5d4426";g.fillRect(cx+38,cy-2,10,4);}
+{const[c,g,cx,cy]=C("s-maint");g.drawImage(SPRITES.worker[0].move,cx-45,cy-21,90,42);g.strokeStyle="rgba(110,220,120,0.85)";g.lineWidth=3;g.beginPath();g.arc(cx,cy,30,0,TAU);g.stroke();}
+{const[c,g,cx,cy]=C("s-rest");g.drawImage(SPRITES.worker[0].move,cx-45,cy-21,90,42);g.fillStyle="rgba(205,190,255,1)";g.textAlign="left";g.font="bold 15px monospace";g.fillText("z",cx+28,cy-6);g.font="bold 21px monospace";g.fillText("z",cx+40,cy-19);}
+// 生命周期
+{const[c,g,cx,cy]=C("l-egg");g.fillStyle="rgba(245,240,225,0.95)";g.beginPath();g.arc(cx,cy,6,0,TAU);g.fill();}
+{const[c,g,cx,cy]=C("l-larva");g.fillStyle="#e8e0c8";g.beginPath();g.ellipse(cx,cy,20,12,0,0,TAU);g.fill();g.fillStyle="#d8d0b8";g.fillRect(cx-10,cy-3,6,6);g.fillRect(cx+3,cy-3,6,6);}
+{const[c,g,cx,cy]=C("l-pupa");g.fillStyle="rgba(210,190,150,0.95)";g.beginPath();g.ellipse(cx,cy,16,11,0,0,TAU);g.fill();}
+{const[c,g,cx,cy]=C("l-adult");g.drawImage(SPRITES.worker[0].move,cx-45,cy-21,90,42);}
+</script>
+</body>
+</html>

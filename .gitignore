@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+*.log
+.tavily/
+
+# local working docs (session logs, not for publication)
+task_plan.md
+findings.md
+progress.md

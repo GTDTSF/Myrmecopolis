@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>蚂蚁精灵草图</title>
+<style>
+  body{margin:0;background:#171310;color:#cfc6bb;font:14px/1.6 monospace;padding:16px 20px}
+  h1{font-size:16px;color:#e8d5a3;margin:8px 0}
+  h2{font-size:14px;color:#e8d5a3;margin:22px 0 8px}
+  .grid{display:flex;gap:8px;flex-wrap:wrap}
+  .tile{background:#3a2c1c;border:1px solid #55402a;text-align:center;padding:4px 6px}
+  .tile canvas{display:block;margin:0 auto}
+  .tile div{font-size:12px;color:#a08a6a;margin-top:2px}
+  .note{color:#8a7a60;font-size:12px;max-width:1100px}
+  #live{background:#4a3826;border:1px solid #55402a;display:block}
+</style>
+</head>
+<body>
+<h1>蚂蚁精灵草图 — 侧视剖面 · 8 方向</h1>
+<p class="note">视图为水平剖面（y=深度）。蚂蚁身体朝向移动方向：水平=行走，竖直=攀爬，斜=45°。腹为阵营色（橙群/蓝群），结构按真实解剖：头·中躯·细腰·腹、膝状触角、上颚、6 足。兵蚁：头宽大色浅、镰刀状大上颚、深橙足。</p>
+
+<h2>工蚁 A（橙）· 8 方向</h2>
+<div class="grid" id="w0"></div>
+<h2>工蚁 A（橙）· 携带食物</h2>
+<div class="grid" id="wc0"></div>
+<h2>工蚁 B（蓝）· 8 方向</h2>
+<div class="grid" id="w1"></div>
+<h2>兵蚁 A（橙）· 8 方向</h2>
+<div class="grid" id="s0"></div>
+<h2>兵蚁 B（蓝）· 8 方向</h2>
+<div class="grid" id="s1"></div>
+<h2>游戏内实际尺寸（S=8，每格 8px）</h2>
+<canvas id="live" width="720" height="160"></canvas>
+
+<script src="ants.js"></script>
+<script>
+initAnts();
+function row(id,caste,colony,carrying,zoom){
+  const box=document.getElementById(id);
+  for(let d=0;d<8;d++){
+    const t=document.createElement("div");t.className="tile";
+    const cv=document.createElement("canvas");
+    const base=(caste==="soldier"?SPRITES.soldier[colony].move:SPRITES.worker[colony][carrying?"carry":"move"]);
+    const B=(base.width+base.height)*zoom;
+    cv.width=cv.height=B;
+    const g=cv.getContext("2d");
+    g.imageSmoothingEnabled=false;
+    g.translate(B/2,B/2);
+    g.rotate(AANG[d]);
+    g.scale(zoom,zoom);
+    g.drawImage(base,-base.width/2,-base.height/2);
+    const lb=document.createElement("div");lb.textContent=ADIR_NAMES[d];
+    t.appendChild(cv);t.appendChild(lb);box.appendChild(t);
+  }
+}
+row("w0","worker",0,false,4);
+row("wc0","worker",0,true,4);
+row("w1","worker",1,false,4);
+row("s0","soldier",0,false,4);
+row("s1","soldier",1,false,4);
+
+// 实际尺寸演示：S=8 格上行走的工蚁 + 竖井攀爬 + 兵蚁
+const g=document.getElementById("live").getContext("2d");
+g.imageSmoothingEnabled=false;
+for(let i=0;i<8;i++){ // 走 8 个方向
+  const cx=60+i*90, cy=50;
+  g.strokeStyle="#55402a";g.strokeRect(cx-32,14,64,64);
+  drawAnt(g,cx,cy,"worker",0,false,AANG[i]);
+}
+// 竖井里上下爬
+g.strokeStyle="#55402a";g.strokeRect(24,96,56,56);g.strokeRect(88,96,56,56);
+drawAnt(g,52,124,"worker",1,false,1);
+drawAnt(g,116,124,"worker",1,false,3);
+// 携带 + 兵蚁
+drawAnt(g,220,124,"worker",0,true,2);
+drawAnt(g,330,124,"soldier",0,false,2);
+drawAnt(g,440,124,"soldier",1,false,7);
+</script>
+</body>
+</html>

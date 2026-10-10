@@ -1,0 +1,20 @@
+[project]
+name = "myrmecopolis"
+version = "0.1.0"
+description = "A live, emergent ant-colony ecosystem simulator in pure Python — zero dependencies"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "GTDTSF" }]
+dependencies = []
+
+[project.scripts]
+myrmecopolis = "myrmecopolis:main"
+
+[project.urls]
+Homepage = "https://github.com/GTDTSF/Myrmecopolis"
+Repository = "https://github.com/GTDTSF/Myrmecopolis"
+
+[build-system]
+requires = ["uv_build>=0.12.14,<0.13.0"]
+build-backend = "uv_build"

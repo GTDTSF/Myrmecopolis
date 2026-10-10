@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>地下蚁国</title>
+<style>
+  body{margin:0;background:#0d0b09;color:#cfc6bb;font:14px/1.5 monospace;display:flex;flex-direction:column;align-items:center}
+  h1{font-size:16px;margin:10px 0 4px;color:#e8d5a3}
+  canvas{image-rendering:pixelated;border:1px solid #333;display:block}
+  #hud{margin:6px 0 4px;display:flex;gap:28px}
+  .c0{color:#ffb020}.c1{color:#40c4ff}
+  .hint{color:#666;font-size:12px;margin-bottom:14px}
+</style>
+</head>
+<body>
+<h1>地下蚁国 — 蚂蚁生态模拟器 <a href="/gallery" style="font-size:13px;color:#ffb020">· 蚁群图鉴 →</a></h1>
+<canvas id="cv" width="2880" height="1800"></canvas>
+<div id="hud"></div>
+<div class="hint">单群落 · 觅食 · 掘隧道 · 育幼 · 扩建 · 维护 · 休息 · 绿圈=维护蚁（巡查/修复蚁穴）· zzz=睡觉蚁（累了回巢歇脚）</div>
+<script src="ants.js"></script>
+<script>
+const W=240,H=150,S=12;
+initAnts();
+const cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+const off=document.createElement("canvas");off.width=W;off.height=H;
+const octx=off.getContext("2d"),img=octx.createImageData(W,H);
+const hud=document.getElementById("hud");
+let terrain=null,lastV=-1,frame=0;
+const b64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+
+function drawGrid(fb){
+  const d=img.data;
+  for(let i=0;i<W*H;i++){
+    const t=terrain[i],f=fb[i];
+    let r,g,b;
+    if(t===0){r=82;g=74;b=84}
+    else if(t===1){const y=(i/W)|0;const k=1-(y/H)*0.35;r=95*k;g=72*k;b=48*k}
+    else{r=24;g=18;b=13}
+    if(f>0){const k=Math.min(1,f/120);r+=(150-r)*k;g+=(200-g)*k;b+=(60-b)*k}
+    const o=i*4;d[o]=r;d[o+1]=g;d[o+2]=b;d[o+3]=255;
+  }
+  octx.putImageData(img,0,0);
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(off,0,0,W*S,H*S);
+}
+
+function drawPantry(fc){
+  for(const [x,y,amt] of fc){
+    if(amt<1)continue;
+    const k=Math.min(1,amt/60);
+    ctx.fillStyle=`rgb(${120+30*k|0},${150+40*k|0},60)`;
+    ctx.fillRect(x*S+2,y*S+3,4,2+2*k|0);
+  }
+}
+
+function drawMounds(e){
+  for(const xs of e){
+    for(const x of xs){
+      ctx.fillStyle="#5d4426";
+      ctx.fillRect(x*S, S*1.4, S, S*0.6);
+      ctx.fillStyle="#75582f";
+      ctx.fillRect(x*S+2, S*0.8, S-4, S*0.7);
+    }
+  }
+}
+
+const angState=new Map(); // uid -> 当前朝向角（弧度），跨帧插值
+function drawActors(a,l,q){
+  for(let c=0;c<q.length;c+=3){drawQueen(ctx,(q[c]+0.5)*S,(q[c+1]+0.5)*S,c/3);
+    if(q[c+2]){ // 蚁后睡觉：zzz 睡眠特效（睡时暂停产卵）
+      const ph=performance.now()/600;
+      ctx.save();ctx.translate((q[c]+0.5)*S,(q[c+1]+0.5)*S);ctx.textAlign="center";
+      ctx.fillStyle="rgba(205,190,255,1)";
+      for(let i=0;i<3;i++){ctx.globalAlpha=0.95-i*0.28;ctx.font=`bold ${8+i*5}px monospace`;ctx.fillText("z",8+i*7,-4-i*8+Math.sin(ph+i*0.9)*1.5);}
+      ctx.restore();
+    }
+  }
+  const seen=new Set();
+  for(const [uid,x,y,c,st,caste,dir,maint,rest] of a){
+    seen.add(uid);
+    const tgt=AANG[dir];
+    let cur=angState.get(uid);
+    if(cur===undefined)cur=tgt;
+    let d=tgt-cur;
+    while(d>Math.PI)d-=2*Math.PI;
+    while(d<-Math.PI)d+=2*Math.PI;
+    cur+=d*0.35; // 指数趋近，约 200ms 完成转向
+    angState.set(uid,cur);
+    drawAnt(ctx,(x+0.5)*S,(y+0.5)*S,caste===1?"soldier":"worker",c,st===1,cur);
+    if(rest){ // 休息蚁：zzz 睡眠特效（干累了回蚁巢歇脚）
+      const ph=performance.now()/550 + uid*0.7;
+      ctx.save();
+      ctx.translate((x+0.5)*S,(y+0.5)*S);
+      ctx.textAlign="center";
+      ctx.fillStyle="rgba(205,190,255,1)";
+      for(let i=0;i<3;i++){
+        ctx.globalAlpha=0.95 - i*0.28;
+        ctx.font=`bold ${8+i*5}px monospace`;
+        ctx.fillText("z", 8+i*7, -3 - i*8 + Math.sin(ph+i*0.9)*1.5);
+      }
+      ctx.restore();
+    }
+    if(maint){ // 维护蚁：绿色光环（定期巡查蚁穴、修复塌陷巢格）
+      ctx.save();
+      ctx.translate((x+0.5)*S,(y+0.5)*S);
+      ctx.strokeStyle="rgba(110,220,120,0.85)";
+      ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.arc(0,0,13,0,Math.PI*2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+  if(angState.size>seen.size*2+200)
+    for(const k of angState.keys())if(!seen.has(k))angState.delete(k); // 清理死亡蚂蚁
+  for(const [x,y,st] of l){ // 阶段7.4：三阶段幼体分色渲染（卵=小白点 / 幼虫=米色方 / 蛹=浅褐椭圆）
+    const cx=(x+0.5)*S, cy=(y+0.5)*S;
+    if(st===0){ // 卵
+      ctx.fillStyle="rgba(245,240,225,0.95)";
+      ctx.beginPath();ctx.arc(cx,cy,2,0,Math.PI*2);ctx.fill();
+    }else if(st===1){ // 幼虫
+      ctx.fillStyle="#e8e0c8";
+      ctx.fillRect(x*S+2,y*S+2,4,4);
+    }else{ // 蛹
+      ctx.fillStyle="rgba(210,190,150,0.95)";
+      ctx.beginPath();ctx.ellipse(cx,cy,3,2.2,0,0,Math.PI*2);ctx.fill();
+    }
+  }
+}
+
+function drawDaylight(p){ // 昼夜渐变：p 0-1，0=白昼最亮、0.5=深夜最暗
+  const dark=0.5*(1-Math.cos(2*Math.PI*p)); // 平滑：昼(0)→夜(1)→昼(0)
+  if(dark>0.01){
+    ctx.fillStyle="rgba(8,12,40,"+(dark*0.42).toFixed(3)+")";
+    ctx.fillRect(0,0,W*S,H*S);
+  }
+}
+
+function drawSleepRoom(sr){ // 阶段10：多睡室标记（虚线椭圆 + Zz），蚂蚁在此歇脚（不睡蚁后主厅）
+  if(!sr)return;
+  for(const [cx,cy,rx,ry] of sr){
+    ctx.save();
+    ctx.translate((cx+0.5)*S,(cy+0.5)*S);
+    ctx.strokeStyle="rgba(150,140,220,0.4)";
+    ctx.lineWidth=1.5;ctx.setLineDash([3,3]);
+    ctx.beginPath();ctx.ellipse(0,0,rx*S,ry*S,0,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle="rgba(205,190,255,0.85)";
+    ctx.font="bold 12px monospace";ctx.textAlign="center";
+    ctx.fillText("Zz",0,-ry*S-4);
+    ctx.restore();
+  }
+}
+
+function drawHud(s){
+  hud.innerHTML=`<span class="c0">蚁群 人口 ${s[0]} · 储粮 ${s[1]} · 幼体 ${s[2]} · 采食 ${s[3]}</span>`;
+}
+
+new EventSource("/stream").onmessage=(e)=>{
+  const d=JSON.parse(e.data);
+  if(d.v!==lastV){
+    lastV=d.v;
+    fetch("/terrain?v="+d.v).then(r=>r.json()).then(r=>{terrain=b64(r.t);});
+  }
+  frame++;
+  const fb=b64(d.f);
+  if(terrain)drawGrid(fb);
+  drawMounds(d.e||[[],[]]);
+  drawPantry(d.fc||[]);
+  drawActors(d.a,d.l,d.q);
+  drawSleepRoom(d.sr);
+  drawDaylight(d.day||0);
+  drawHud(d.s);
+};
+</script>
+</body>
+</html>
