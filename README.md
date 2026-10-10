@@ -1,76 +1,67 @@
 # Myrmecopolis
 
-**蚁国 — a live, emergent ant-colony ecosystem.** Pure Python, zero dependencies:
-one command launches a real-time ant society you can watch in the browser —
-foraging, tunnel-digging, raising brood, and a nest that grows organically from a
-single chamber into a full underground city.
+**蚁国 — 活的、涌现的蚁群生态系统。** 纯 Python，零依赖：
+一条命令启动一个可在浏览器中实时观看的蚁群社会——
+觅食、掘隧道、育幼，以及从单个房间有机生长成整座地下城市的蚁巢。
 
 ![A 150,000-tick nest](docs/nest_preview.png)
 
-*Seed 5 after 150,000 ticks — 14 rooms (main hall / brood / food / sleep),
-winding corridors in six curvature styles, room-to-room shortcuts, and an
-exploratory tunnel web.*
+*种子 5 运行 15 万 tick 后 —— 14 个房间（主厅 / 育幼室 / 粮室 / 睡室）、
+六种曲率形态的蜿蜒走廊、房-房互联捷径，以及一张探索隧道网。*
 
-## What it simulates
+## 模拟内容
 
-- **Full life cycle** — egg → larva → pupa → adult; caste assigned at emergence;
-  age, fatigue and starvation all kill.
-- **Foraging & economy** — food drops on the surface, foragers carry it back,
-  granary chambers store it, and the colony lives a just-in-time economy.
-- **Self-dug nest** — chambers, meandering corridors (six curvature archetypes:
-  S / wave / arc / spiral / zigzag / wobble), room-to-room shortcuts and a
-  capped exploratory web. The layout is never scripted; it is excavated.
-- **Emergent control** — crowding gates reproduction, maintenance ants patch
-  collapsing rooms, soil reclaims abandoned tunnels. No events are scripted.
-- **Deterministic** — one seed fully determines the colony.
+- **完整生命周期** — 卵 → 幼虫 → 蛹 → 成蚁；阶级在羽化时确定；
+  衰老、疲劳和饥饿都会致死。
+- **觅食与经济** — 食物落在地表，觅食蚁将其搬回，粮室储存，群落过着"即时制"经济生活。
+- **自掘蚁巢** — 房间、蜿蜒走廊（六种曲率形态：S 形 / 多波 / 弓形 / 螺旋 / 锯齿 / 微抖）、
+  房-房互联捷径和带上限的探索网。布局从不脚本化——全部是挖出来的。
+- **涌现控制** — 拥挤度门控繁殖，维护蚁修补坍塌的房间，土壤回收废弃隧道。没有任何脚本化事件。
+- **确定性** — 一个种子完全决定群落。
 
-## Quick start
+## 快速开始
 
-Needs Python 3.12+ (or just [uv](https://docs.astral.sh/uv/)):
+需要 Python 3.12+（或直接装 [uv](https://docs.astral.sh/uv/)）：
 
 ```bash
 uv sync
-uv run myrmecopolis          # serves http://127.0.0.1:8000
+uv run myrmecopolis          # 服务 http://127.0.0.1:8000
 ```
 
-Open http://127.0.0.1:8000 — the colony starts from a queen plus five workers
-and builds everything else on its own.
+打开 http://127.0.0.1:8000 —— 群落从一只蚁后加五只工蚁起步，其余全部自建。
 
-Headless self-check (no server):
+无头自检（不起服务器）：
 
 ```bash
 uv run myrmecopolis --smoke
 ```
 
-| flag | meaning | default |
-|------|---------|---------|
-| `--port` | server port | `8000` |
-| `--seed` | world seed (deterministic) | `5` |
-| `--smoke` | run the headless self-checks and exit | off |
-| `--ticks` | smoke-test tick count | `3000` |
+| 参数 | 含义 | 默认值 |
+|------|------|--------|
+| `--port` | 服务器端口 | `8000` |
+| `--seed` | 世界种子（确定性） | `5` |
+| `--smoke` | 运行无头自检后退出 | 关 |
+| `--ticks` | smoke 测试 tick 数 | `3000` |
 
-## Render a long-run nest to PNG
+## 渲染长时运行蚁巢到 PNG
 
 ```bash
-uv run tools/render_nest.py   # 150,000 ticks → nest_preview.png (current dir)
+uv run tools/render_nest.py   # 15 万 tick → nest_preview.png（当前目录）
 ```
 
-## How it works
+## 工作原理
 
-A 240×150 cell grid, one `World.tick()` per frame (60 fps in the browser).
-Navigation is candidate-cell scoring — no pathfinding, no pheromones.
+240×150 格网格，每帧一次 `World.tick()`（浏览器 60 fps）。
+导航是候选格打分——无寻路、无信息素。
 
-- `src/myrmecopolis/constants.py` — every tunable in one file
-- `src/myrmecopolis/ant.py`, `colony.py` — ant & colony state machines
-- `src/myrmecopolis/world.py` — the orchestrator: terrain, food, digging gates,
-  life cycle, serialization
-- `src/myrmecopolis/smoke.py` — headless regression self-checks
-- `src/myrmecopolis/web.py` — zero-dependency HTTP server: SSE frame stream,
-  terrain versioning, and the canvas renderer in `static/`
+- `src/myrmecopolis/constants.py` — 所有可调参数集中一个文件
+- `src/myrmecopolis/ant.py`、`colony.py` — 蚂蚁与群落状态机
+- `src/myrmecopolis/world.py` — 编排器：地形、食物、挖掘门控、生命周期、序列化
+- `src/myrmecopolis/smoke.py` — 无头回归自检
+- `src/myrmecopolis/web.py` — 零依赖 HTTP 服务器：SSE 帧流、地形版本管理，以及 `static/` 中的画布渲染器
 
-No libraries, no build step, no data files — `http.server`, `random` and
-`threading` only.
+无第三方库、无构建步骤、无数据文件——只用 `http.server`、`random` 和 `threading`。
 
-## License
+## 许可证
 
-MIT — see [LICENSE](LICENSE).
+MIT — 见 [LICENSE](LICENSE)。
