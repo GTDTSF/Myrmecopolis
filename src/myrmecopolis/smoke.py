@@ -56,9 +56,10 @@ def smoke(ticks: int = 6000) -> None:
     w3 = World(seed=5)
     food_peak = 0.0  # 后期(20000t+)粮室存粮峰值：紧经济下存粮贴近消耗，末刻单快照会误报
     rooms_with_food_peak = 0
-    # 35000t：产卵门软化后种群增速加快，第 13 间房的走廊可能 30000t 时仍在挖（unlinked
-    # 为瞬时施工态），多给 5000t 让"全部连通"断言不卡在临时状态（2026-10-09 实测 35k 全连通）
-    for _ in range(35000):
+    # 50000t：动态房随种群出现、走廊施工需 5-15k，末批房（13/14 间）在 35k 时仍在挖属
+    # 瞬时施工态（2026-10-10 实测 seed5：room12 于 40-50k 间、room13 于 45-50k 间 linked），
+    # 多给时间让"全部连通"断言不卡在临时状态
+    for _ in range(50000):
         w3.tick()
         if w3.tick_count >= 20000:
             fsum = sum(ch["store"] for ch in w3.colonies[0].chambers if ch.get("kind") == "food")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 
-from .constants import SEEK, SOLDIER, WANDER
+from .constants import SEEK, SOLDIER
 
 class Ant:
     _next_uid = 0
@@ -16,7 +16,10 @@ class Ant:
         self.x = x
         self.y = y
         self.d = rng.randrange(8)
-        self.state = WANDER if role == SOLDIER else SEEK
+        # 2026-10-10：兵蚁也参与觅食（SEEK）。单群落世界无战斗职责后，兵蚁（占出生 25%、
+        # 寿命还是工蚁 3 倍→稳态占全群 ~50%）若只游荡不生产，是纯能量汇→存粮永远为 0。
+        # 真实蚁群的"兵蚁/小型工蚁"同样参与觅食运输。
+        self.state = SEEK
         self.hp = 60.0 if role == SOLDIER else 40.0
         self.energy = 100.0
         self.role = role

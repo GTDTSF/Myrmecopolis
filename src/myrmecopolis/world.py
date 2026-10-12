@@ -3,10 +3,12 @@ from __future__ import annotations
 import base64
 import math
 import random
+from array import array
+from collections import deque
 
 from .ant import Ant
 from .colony import Colony
-from .constants import W, H, SURFACE, ROCK, DIRT, TUNNEL, DIRS, SEEK, CARRY, WANDER, WORKER, SOLDIER, MAX_POP, FOOD_CAP, FOOD_DROP_P, FOOD_DROP_MIN, FOOD_DROP_MAX, FOOD_SCAN_EVERY, FOOD_BAND, WALK_P, DIG_P, NEST_TARGET, NEST_RADIUS, CHAMBER_BIAS, SHAFT_BIAS, NEST_GROW_EVERY, MAX_CHAMBERS, PATH_BIAS, RECLAIM_K, RECLAIM_P, MAINTAIN_EVERY, MAINTAINER_MAX, ROOM_DECAY_P, CROWD_P, FOOD_PER_CELL, FATIGUE_RATE, FATIGUE_MAX, REST_RECOVER, REST_MIN_FAT, REST_REGEN, DAY, QUEEN_NAP, QUEEN_WAKE, EGG_TIME, LARVA_TIME, PUPA_TIME, BRIDGE_BIAS, EXPLORER_MOD, WEB_CAP
+from .constants import W, H, SURFACE, ROCK, DIRT, TUNNEL, DIRS, SEEK, CARRY, WORKER, SOLDIER, MAX_POP, FOOD_CAP, FOOD_DROP_P, FOOD_DROP_MIN, FOOD_DROP_MAX, FOOD_SCAN_EVERY, FOOD_BAND, WALK_P, DIG_P, NEST_TARGET, NEST_RADIUS, CHAMBER_BIAS, SHAFT_BIAS, NEST_GROW_EVERY, MAX_CHAMBERS, PATH_BIAS, RECLAIM_K, RECLAIM_P, MAINTAIN_EVERY, MAINTAINER_MAX, ROOM_DECAY_P, CROWD_P, FOOD_PER_CELL, FATIGUE_RATE, FATIGUE_MAX, REST_RECOVER, REST_MIN_FAT, REST_REGEN, DAY, QUEEN_NAP, QUEEN_WAKE, EGG_TIME, LARVA_TIME, PUPA_TIME, BRIDGE_BIAS, EXPLORER_MOD, WEB_CAP, WEB_RADIUS, ORPHAN_SWEEP_EVERY
 
 def _b64(b: bytearray) -> str:
     return base64.b64encode(bytes(b)).decode()
@@ -26,17 +28,24 @@ class World:
         self.targets: list[tuple[int, int]] = []
         self.terrain_version = 0
         self.tick_count = 0
+        # 格子溯源（纯记账，不影响行为/RNG）：dig_t=该格最后一次被挖开的 tick（0=未挖开过），
+        # dig_src=谁挖的：1=开局 2=builder 3=探路蚁 4=突破蚁 5=维护蚁 6=入口重开。
+        # 房间类型无需存储：格落在哪个房间椭圆内就是什么房（_in_any_chamber）。
+        self.dig_t = array("I", [0]) * n
+        self.dig_src = bytearray(n)
         self.web_count = 0  # 地底未标记隧道（探索网）格数：WEB_CAP 上限控制探路蚁开挖
         self.colonies: list[Colony] = []
         self._init_terrain()
         self._init_food()
         self._init_colonies()
 
-    def _dig(self, x: int, y: int) -> None:
+    def _dig(self, x: int, y: int, src: int = 0) -> None:
         i = y * W + x
         if self.terrain[i] != TUNNEL:
             self.terrain[i] = TUNNEL
             self.terrain_version += 1
+            self.dig_t[i] = self.tick_count  # 溯源：最后一次被挖开的 tick
+            self.dig_src[i] = src
             nested = False
             for col in self.colonies:
                 # 标记蚁穴格：巢室/走廊/入口竖井 → 受维护保护（免土壤回填），维护蚁定期巡查修复
@@ -98,7 +107,7 @@ class World:
             ny = H - 45
             for y in range(ny - 2, ny + 3):
                 for x in range(nx - 2, nx + 3):
-                    self._dig(x, y)
+                    self._dig(x, y, 1)  # 开局初始巢穴
             # 清除竖井走廊（nx-1..nx+1 的 3 宽硬门列）内的巨石：竖井只准在此列挖，
             # 遇不可穿的 ROCK 就会卡死在半空挖不穿（阶段8 单群落：无备份群落，必须保证能通地表）
             for y in range(3, ny + 1):
@@ -122,13 +131,15 @@ class World:
             col.start_store = 150.0  # 建群初始储备粮（先消耗，粮室接通后存入各粮室）：撑到觅食起量，防开局饿死
             self._recount_nest_dirt(col)
             self.colonies.append(col)
-            # 标记初始蚁穴格（开局 5×5 主厅团块）：_dig 在 col 创建前运行，此处补标
+            # 标记初始蚁穴格（开局 5×5 主厅团块）：_dig 在 col 创建前运行，此处补标。
+            # 补标时冲销 web_count：_dig 当时看不到群落（nested=False）把它们算进了网量
             for y in range(ny - 2, ny + 3):
                 for x in range(nx - 2, nx + 3):
                     i = y * W + x
                     if self.terrain[i] == TUNNEL:
                         self.nest_mark[i] = 1
                         col.nest_cells.add(i)
+                        self.web_count -= 1
 
     def _in_any_chamber(self, col: Colony, x: int, y: int) -> bool:
         for ch in col.chambers:
@@ -530,7 +541,7 @@ class World:
             if (
                 not col.queen_resting  # 蚁后睡觉→暂停产卵（睡眠占日的一部分）
                 and self.tick_count - col.last_lay >= lay_interval
-                and available >= 12
+                and available >= 8
                 and col.population < MAX_POP
                 and rng.random() < (1.0 - 0.85 * crowding)
             ):
@@ -538,7 +549,10 @@ class World:
                 brood_cell = self._free_chamber_cell(col, col.chambers[0])
             if brood_cell is not None:
                 col.last_lay = self.tick_count
-                self._take_food(col, 12)
+                # 2026-10-10：产卵耗粮 12→8。旧值下产卵是全群落最大耗粮项
+                #（pop≥80 时每 50t 一卵 ≈ 2400 粮/万tick，占需求 67%）→ 存粮永远贴 0、
+                # 无缓冲扛老死波。降到 8（≈1600/万tick）给存粮留出缓冲空间。
+                self._take_food(col, 8)
                 # 阶段7.4：先产**卵**（不吃、最短）；阶级不在产卵时定，蛹期羽化才定（真实蚂蚁）
                 col.eggs.append({"x": brood_cell[0], "y": brood_cell[1], "age": 0, "moved": False})
             # 阶段7.4 生命周期 ① 卵→幼虫：卵不吃东西，到 EGG_TIME 化幼虫（留在原地）
@@ -638,6 +652,10 @@ class World:
                         if (a.x - ch["cx"]) ** 2 / (rx * rx) + (a.y - ch["cy"]) ** 2 / (ry * ry) <= 1:
                             occ[j] += 1
                 col.sleep_target = col.sleep_rooms[occ.index(min(occ))]
+                # 睡室必须挖出可用面积才许当休息目标：未挖的睡室是土椭圆，拽过去=罢工（2026-10-10 开井期全灭根因）
+                col.sleep_ready = self.room_capacity(col, col.sleep_target) >= 20
+            else:
+                col.sleep_ready = False
             col.brood_room = next((ch for ch in col.chambers if ch.get("kind") == "brood"), None)
             col.food_rooms = [ch for ch in col.chambers if ch.get("kind") == "food"]
             col.food_target = (
@@ -677,6 +695,8 @@ class World:
             self._link_rooms(col)
         self._entrances()
         self._defend()
+        if self.tick_count % ORPHAN_SWEEP_EVERY == 0:
+            self._sweep_orphans()
 
     def _entrances(self) -> None:
         """多出入口：巢长大后在侧面生成待挖入口列，打通地表即 open。"""
@@ -748,6 +768,8 @@ class World:
             if t[i] == DIRT:
                 t[i] = TUNNEL
                 self.terrain_version += 1
+                self.dig_t[i] = self.tick_count  # 溯源：入口重开
+                self.dig_src[i] = 6
         col.sealed.clear()
 
     def _reclaim(self, dead: set[int]) -> None:
@@ -764,18 +786,20 @@ class World:
             x, y = i % W, i // W
             if y < SURFACE:
                 continue
-            if any(
+            in_box = any(
                 abs(x - c.qx) <= NEST_RADIUS and abs(y - c.qy) <= NEST_RADIUS
                 for c in self.colonies
-            ):
-                continue
+            )
             decayed_room = False
             if self.nest_mark[i]:
+                if in_box:
+                    continue  # 巢格在巢芯箱内：免回填（房/走廊/竖井都该常驻）
                 # 蚁穴格：走廊/竖井不塌；房格极慢塌缩（维护蚁修复目标，防房间长期无人维护失修）
                 if not self._in_any_chamber(self.colonies[0], x, y) or self.rng.random() >= ROOM_DECAY_P:
                     continue
                 decayed_room = True
             elif self.rng.random() >= RECLAIM_P:
+                # 探索网（含巢芯箱内的）照常可回收——旧版整箱免回填，巢芯周围网格永久积累成"散点"
                 continue
             t[i] = DIRT
             self.terrain_version += 1
@@ -785,6 +809,46 @@ class World:
             if a is not None:  # 塌陷活埋
                 dead.add(id(a))
                 a.food = 0
+
+    def _sweep_orphans(self) -> None:
+        """孤儿清扫：与蚁巢断联的探索网碎片（蚂蚁再也够不到的死格）整批回填。
+        随机回收 ~6 万 tick/格，碎片会永久残留成"散点"（2026-10-10 诊断：171 片/337 格）。
+        从巢格 BFS，不可达的未标记隧道全部回填；压在碎片上的蚂蚁活埋（同塌陷）。
+        纯确定性（无 RNG 调用）。"""
+        t = self.terrain
+        reached = bytearray(W * H)
+        dq = deque()
+        for c in self.colonies:
+            for i in c.nest_cells:
+                if t[i] == TUNNEL and not reached[i]:
+                    reached[i] = 1
+                    dq.append(i)
+        while dq:
+            i = dq.popleft()
+            x, y = i % W, i // W
+            for dx, dy in DIRS:
+                xx, yy = x + dx, y + dy
+                if 0 <= xx < W and 0 <= yy < H:
+                    j = yy * W + xx
+                    if t[j] == TUNNEL and not reached[j]:
+                        reached[j] = 1
+                        dq.append(j)
+        pos = {(a.x, a.y): a for c in self.colonies for a in c.ants}
+        dead = set()
+        n = 0
+        for i in range(SURFACE * W, W * H):
+            if t[i] == TUNNEL and not self.nest_mark[i] and not reached[i]:
+                t[i] = DIRT
+                n += 1
+                a = pos.get((i % W, i // W))
+                if a is not None:  # 压在孤儿碎片上的蚂蚁活埋
+                    dead.add(id(a))
+                    a.food = 0
+        if n:
+            self.terrain_version += 1
+            self.web_count = max(0, self.web_count - n)
+            for c in self.colonies:
+                c.ants = [a for a in c.ants if id(a) not in dead]
 
     def _step_ant(self, a: Ant, col: Colony, all_pos: dict, occ: dict, dead: set[int]) -> None:
         rng = self.rng
@@ -863,10 +927,16 @@ class World:
                 and not a.building
                 and not a.maintaining
                 and not a.resting
+                and a.state == SEEK
+                and a.food == 0
                 and a.y >= SURFACE
                 # 2026-10-09 软化 builder 门（同产卵门）：用"可用粮"(仓库+在途)而非仅 store。
                 # 旧版 store>=15 在 JIT 经济下死锁：存粮贴 0→无 builder→突破蚁绝迹→
                 # 粮室走廊不通→粮食无处入库→store 永远回不到 15（seed5 实测 10k 后建造冻结）。
+                # 2026-10-10 排除搬运蚁：在途粮计入 food_available→返巢 CARRY 蚁在竖井里
+                # (y>=3) 被中途转成 builder（committed 永不释放：chambers_dirt 恒>0）→
+                # 每趟往返都可能掏空一名觅食者→小群下觅食池归零、存粮永 0、突破蚁饿死、
+                # 动态房间走廊永久卡死（seed5 实测 45k 后拾取冻结、粮室 50k 未 linked）。
                 and col.food_available >= 15
                 and work_left
                 and col.n_builders < build_cap
@@ -980,8 +1050,9 @@ class World:
                         # 探路蚁只准延伸自己的 1 宽须：tn==1（恰好 1 个隧道邻）。
                         # 缝格/交叉格(tn≥2)禁挖——否则走廊之间的土被逐步吃穿、整巢融成大方形洞
                         # （用户"方形不符合自然规律"）。须会在已有隧道 1 格外自然停住（留薄土墙），
-                        # 探索网 = 不交叉的须状死胡同 + WEB_CAP 封顶 + 废弃被回收。
+                        # 探索网 = 不交叉的须状死胡同 + WEB_CAP 封顶 + WEB_RADIUS 限巢周 + 废弃被回收。
                         and tn == 1
+                        and abs(nx - col.qx) + abs(ny - col.qy) <= WEB_RADIUS
                     ):
                         continue
             # 直行惯性：强偏好当前方向 + 小随机扰动 → 转弯平滑缓慢、动作连贯不抽搐
@@ -1022,7 +1093,12 @@ class World:
             if a.state == SEEK and food[i] and not a.maintaining and a.egg is None:
                 score += food[i] * 0.1
             if target is not None:
-                score -= (abs(nx - target[0]) + abs(ny - target[1])) * 0.4
+                # 2026-10-10 觅食修复：旧 0.4 < 直行惯性 0.6，地表觅食蚁转向不了食物——
+                # 只能沿直线走到地图边缘再折返（1D 随机游走），唯一能捡到的是恰好在
+                # 入口口掉落的食物（实测拾取全在 x∈[117,123]）→ 吞吐量取决于掉粮 RNG
+                # 运气 → 存粮攒不出缓冲 → 老死波一来全群饿死（seed5 150k 实测 44k 冻结）。
+                # 0.8 > 0.6：觅食蚁主动走向最近食物簇，吞吐量与掉粮位置解耦。
+                score -= (abs(nx - target[0]) + abs(ny - target[1])) * 0.8
             if nesting:
                 if pending is not None:
                     # 入口施工：向待挖入口列掘进，打通地表
@@ -1060,12 +1136,25 @@ class World:
                 if a.state == CARRY and not a.resting:
                     # 阶段10：搬运蚁走向目标粮室（最空那间→食物多间均分）；无粮室时回退蚁后处。
                     # 地表上先回主入口竖井口（唯一上下通道）——直瞄地下粮室会让蚁走到粮室 x 坐标的地表后下不去
+                    # 2026-10-10 修复：旧 0.3/0.25 < 直行惯性 0.6，搬运蚁转向不了竖井/粮室走廊。
+                    # 旧代码靠"食物恰掉在入口口"侥幸成立（回巢只有 5 格）；觅食改主动导航后
+                    # 拾取点在 70 格外的食物簇，回巢 50-140 格→搬运蚁走到地图边缘才被迫折返
+                    # （实测 drop 5/万 vs pick 20/万，15 只载体迷路饿死在回巢路上，store 永远 0）。
+                    # 0.8 > 0.6：沿已有隧道直线汇回竖井口→粮室。
                     ft = col.food_target
                     if a.y < SURFACE:
                         tx, ty = (col.qx, SURFACE)
+                    elif (abs(a.x - col.qx) + abs(a.y - col.qy)) > 12:
+                        # 2026-10-10 两段导航：地下先回主厅枢纽，再进粮室。
+                        # 直瞄远端粮室的直线梯度在迷宫走廊里会卡死：seed3 实测搬运蚁
+                        # 沿竖井被梯度拽进育虫室死端（育虫室恰在竖井线上），梯度指向
+                        # 粮室方向的土墙（中间隔 3 格土）→ 22 只载体在 4×10 区域振荡
+                        # 到能量耗尽（200 tick 内 e=7→0 全灭，30k 零入库）。
+                        # 所有走廊都由主厅放射而出→第二段梯度与走廊走向一致，可靠。
+                        tx, ty = (col.qx, col.qy)
                     else:
                         tx, ty = (ft["cx"], ft["cy"]) if ft is not None else (col.qx, col.qy)
-                    score -= (abs(nx - tx) + abs(ny - ty)) * (0.3 if a.y < SURFACE else 0.25)
+                    score -= (abs(nx - tx) + abs(ny - ty)) * 0.8
                 if a.egg is not None and not a.resting:
                     # 阶段11：搬运卵→直走育虫室。梯度必须 > 直行惯性 0.6（否则蚁会一路走直线把卵带出巢）
                     br = col.brood_room
@@ -1093,13 +1182,16 @@ class World:
                 a.egg is None
                 and not (a.state == CARRY and a.food)
                 and a.fatigue >= FATIGUE_MAX
-                and col.sleep_target is not None
+                and col.sleep_ready  # 睡室已挖出可用面积（未挖=土椭圆，拽过去=罢工）
                 and a.y >= SURFACE
-                and (abs(a.x - col.qx) + abs(a.y - col.qy)) <= 60  # 覆盖到外围动态睡室（0.3 < 上偏置 1.0，不困住觅食蚁）
+                and (abs(a.x - col.qx) + abs(a.y - col.qy)) <= 90  # 覆盖最外围动态睡室（房距 ≤76+房半径）
             ):
-                # 阶段7.3/10：累了(疲劳满)且在巢内→缓步走向目标睡室（最空那间）歇脚
+                # 阶段7.3/10：累了(疲劳满)且在巢内→走向目标睡室（最空那间）歇脚。
+                # 2026-10-10 修复疲劳陷阱：旧 0.3 < 直行惯性 0.6，疲劳蚁根本转向不了睡室，
+                # 在巢里带满疲劳打转直到老死（seed5 实测 41 蚁 30 疲劳满、0 在睡室→群落塌缩）。
+                # 梯度须 > 直行惯性 0.6 + 觅食上偏置 1.0 才能拽动疲劳蚁：1.2。
                 st = col.sleep_target
-                score -= (abs(nx - st["cx"]) + abs(ny - st["cy"])) * 0.3
+                score -= (abs(nx - st["cx"]) + abs(ny - st["cy"])) * 1.2
             if score > best_score:
                 best_score, best_i, best_d = score, i, d
         if best_i is None:
@@ -1112,7 +1204,13 @@ class World:
                 return  # 还在挖这一格
         elif rng.random() >= WALK_P:
             return  # 这 tick 没迈开步
-        self._dig(nx, ny)
+        if a.maintaining:
+            src = 5  # 维护蚁修复
+        elif a.building:
+            src = 4 if a.breaking else (3 if a.eat_offset % EXPLORER_MOD == 0 else 2)
+        else:
+            src = 0  # 走已有隧道，_dig 不会改写
+        self._dig(nx, ny, src)
         a.x, a.y = nx, ny
         if a.egg is not None:
             a.egg["x"], a.egg["y"] = nx, ny  # 卵随工蚁移动
@@ -1140,7 +1238,7 @@ class World:
                 ft["store"] += give  # 食物入房即计入 col.store（=各房之和）
             a.food = 0
             a.energy = min(150.0, a.energy + 50)
-            a.state = WANDER if a.role == SOLDIER else SEEK
+            a.state = SEEK  # 2026-10-10：兵蚁回巢卸粮后继续觅食（同初始化，不再 WANDER 游荡耗能量）
         elif (
             a.egg is not None
             and col.brood_room is not None
