@@ -697,6 +697,7 @@ class World:
         self._defend()
         if self.tick_count % ORPHAN_SWEEP_EVERY == 0:
             self._sweep_orphans()
+            self._sweep_stubs()  # 短须清扫：与孤儿清扫同频，去掉 1-2 格直线小隧道
 
     def _entrances(self) -> None:
         """多出入口：巢长大后在侧面生成待挖入口列，打通地表即 open。"""
@@ -849,6 +850,65 @@ class World:
             self.web_count = max(0, self.web_count - n)
             for c in self.colonies:
                 c.ants = [a for a in c.ants if id(a) not in dead]
+
+    def _sweep_stubs(self, max_len: int = 2) -> None:
+        """短须清扫：探路网的死端分支若 ≤max_len 格，整支回填（2026-10-10 用户"避免一两个的
+        直线小隧道"）。探路蚁 tn==1 延伸 1 宽须常只挖 1-2 格就停（下一格 tn≥2 禁挖 / 蚁转向）
+        → 满巢戳出单格/双格短须（诊断：194 死端里 192 支长度 ≤2，即散点/竖直小隧道）。
+        从每个死端(tn==1)沿唯一 1 宽路回溯到分支点(tn≥2)或非网格，链长 ≤max_len 则整支回填。
+        纯确定性（无 RNG 调用）。"""
+        t = self.terrain
+
+        def is_web(i: int) -> bool:
+            return t[i] == TUNNEL and not self.nest_mark[i] and i // W >= SURFACE
+
+        def tn(i: int) -> int:
+            x, y = i % W, i // W
+            c = 0
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                xx, yy = x + dx, y + dy
+                if 0 <= xx < W and 0 <= yy < H and t[yy * W + xx] == TUNNEL:
+                    c += 1
+            return c
+
+        reclaim: set[int] = set()
+        for i in range(SURFACE * W, W * H):
+            if not is_web(i) or tn(i) != 1:
+                continue  # 只从死端出发
+            chain = []
+            prev, cur = None, i
+            while cur is not None:
+                chain.append(cur)
+                x, y = cur % W, cur // W
+                nxt = None
+                for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    xx, yy = x + dx, y + dy
+                    if 0 <= xx < W and 0 <= yy < H:
+                        j = yy * W + xx
+                        if j != prev and is_web(j) and tn(j) <= 2:
+                            nxt = j
+                            break
+                prev, cur = cur, nxt
+            if len(chain) <= max_len:
+                reclaim.update(chain)
+        if not reclaim:
+            return
+        pos = {(a.x, a.y): a for c in self.colonies for a in c.ants}
+        dead = set()
+        n = 0
+        for i in reclaim:
+            if t[i] != TUNNEL:
+                continue
+            t[i] = DIRT
+            n += 1
+            a = pos.get((i % W, i // W))
+            if a is not None:  # 压在短须上的蚂蚁活埋（同塌陷）
+                dead.add(id(a))
+                a.food = 0
+        self.terrain_version += 1
+        self.web_count = max(0, self.web_count - n)
+        for c in self.colonies:
+            c.ants = [a for a in c.ants if id(a) not in dead]
 
     def _step_ant(self, a: Ant, col: Colony, all_pos: dict, occ: dict, dead: set[int]) -> None:
         rng = self.rng

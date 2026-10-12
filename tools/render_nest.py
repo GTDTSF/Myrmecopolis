@@ -88,5 +88,6 @@ def write_png(path, scale):
         f.write(png)
 
 
-write_png("nest_preview.png", 4)
-print("wrote nest_preview.png", W * 4, "x", H * 4)
+# 2026-10-10 分辨率 4→8（用户"大幅增加分辨率"）：960×600 → 1920×1200
+write_png("nest_preview.png", 8)
+print("wrote nest_preview.png", W * 8, "x", H * 8)
