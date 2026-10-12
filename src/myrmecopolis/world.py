@@ -916,22 +916,25 @@ class World:
         if a.age >= a.max_age:
             dead.add(id(a))  # 老死
             return
-        # 休息（利用蚁巢·睡室）：干累了(疲劳达标)→在**睡室**歇脚（阶段7.3：蚂蚁不睡蚁后主厅），
-        # 在睡室内恢复疲劳+被动回血，歇够了(疲劳回落)才复工。睡室是独立的"歇脚区"。
+        # 休息（写实碎片化打盹）：干累了(疲劳达标)→在巢内**原地**歇脚。
+        # 2026-10-10 修复"疲劳蚁大群无规律徘徊"：旧逻辑要求人**站在睡室内**才许歇，
+        # 但睡室在走廊迷宫里靠直线梯度导航不可靠→seed5@80k 实测 78% 蚁疲劳拉满、仅 3% 在歇，
+        # 其余带满疲劳空转（用户所见"大群徘徊"）。真实蚂蚁本就在巢内到处打盹，不必挤一间睡室。
+        # 改为：地下累了即原地歇（恢复疲劳）；睡室降级为**回血加成区**（at_home 时额外被动回血，
+        # 见下），仍值得去、但去不到也能歇→导航不再是休息的硬前提，彻底解除迷宫依赖。
         at_home = col.in_sleep_room(a.x, a.y)
-        # 累了且正好在睡室内→原地歇脚（不在睡室则继续干活，走向睡室时再歇）→不打断觅食
         if (
             not a.resting
             and a.egg is None
             and not (a.state == CARRY and a.food)
             and a.fatigue >= FATIGUE_MAX
-            and at_home
+            and a.y >= SURFACE  # 在巢内（地下）即许原地歇脚
         ):
             a.resting = True
         if a.resting:
             a.fatigue = max(0.0, a.fatigue - REST_RECOVER)
             if at_home:
-                a.energy = min(150.0, a.energy + REST_REGEN)  # 巢内休息：被动回血
+                a.energy = min(150.0, a.energy + REST_REGEN)  # 睡室内休息：额外被动回血
             if a.fatigue <= REST_MIN_FAT:
                 a.resting = False  # 歇够了→复工
         else:
@@ -955,8 +958,8 @@ class World:
                             i = e.y * W + e.x
                             self.food[i] = min(255, self.food[i] + e.food)
                     break
-        if a.resting and at_home:
-            return  # 在蚁巢内原地休息（不移动/不觅食/不挖，仅防御）
+        if a.resting:
+            return  # 原地休息（不移动/不觅食/不挖，仅防御）——睡室内额外回血，原地歇也有疲劳恢复
         food = self.food
         sig = self.food_p if (a.state == SEEK and not a.maintaining and not a.resting and a.egg is None) else None
         target = self.nearest_food(a.x) if (a.state == SEEK and a.y < SURFACE and not a.building and not a.maintaining and not a.resting and a.egg is None) else None
