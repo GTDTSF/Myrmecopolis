@@ -923,12 +923,18 @@ class World:
         # 改为：地下累了即原地歇（恢复疲劳）；睡室降级为**回血加成区**（at_home 时额外被动回血，
         # 见下），仍值得去、但去不到也能歇→导航不再是休息的硬前提，彻底解除迷宫依赖。
         at_home = col.in_sleep_room(a.x, a.y)
+        # 2026-10-10 修复"竖井大群徘徊"：主厅+主竖井是全巢唯一交通枢纽（上下行/各走廊都过这里），
+        # 原地打盹若允许在此歇脚，累蚁会堆积在竖井口（实测 seed5@80k 23/32 休息蚁全堵在主厅顶 y=100）
+        # → 堵死唯一上下通道、蚁群排队。真实蚂蚁在安静的角落歇、不堵在繁忙的中心。
+        # 故枢纽区（主厅+竖井）禁止歇脚：累蚁在此继续走、出了枢纽再原地歇。
+        in_hub = abs(a.x - col.qx) <= 5 and SURFACE - 1 <= a.y <= col.qy + 6
         if (
             not a.resting
             and a.egg is None
             and not (a.state == CARRY and a.food)
             and a.fatigue >= FATIGUE_MAX
             and a.y >= SURFACE  # 在巢内（地下）即许原地歇脚
+            and not in_hub  # 枢纽区（主厅+竖井）不许歇脚，防堵唯一上下通道
         ):
             a.resting = True
         if a.resting:
