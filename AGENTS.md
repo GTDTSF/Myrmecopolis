@@ -8,6 +8,7 @@
 uv sync
 uv run myrmecopolis                 # 实时服务器 → http://127.0.0.1:8000  （参数：--port、--seed，默认种子 5）
 uv run myrmecopolis --smoke         # 无头回归：3 个世界带断言（最后一个世界 50k tick，需几分钟）
+uv run tools/detector.py [ticks] [seed]   # 蚂蚁扎堆/徘徊检测器：定时检测聚集/空转 bug，退出码 0/1（默认 100k/seed5）
 uv run tools/render_nest.py         # 15 万 tick → 当前目录输出 nest_preview.png
 ```
 
@@ -18,7 +19,7 @@ uv run tools/render_nest.py         # 15 万 tick → 当前目录输出 nest_pr
 - `src/myrmecopolis/constants.py` — **所有可调参数都在这里**；调参 = 只改这一个文件
 - `src/myrmecopolis/world.py` — 约 1200 行编排器：地形、食物、挖掘门控、生命周期、阶级、SSE 帧序列化
 - `src/myrmecopolis/ant.py`、`colony.py` — 蚂蚁数据、群落状态
-- `src/myrmecopolis/smoke.py` — 回归断言；`web.py` — 标准库 HTTP + SSE；`sim.py` — 再导出垫片（导入走 `from .sim import World`）
+- `src/myrmecopolis/smoke.py` — 回归断言；`detect.py` — 扎堆/徘徊检测器（smoke 已接入）；`web.py` — 标准库 HTTP + SSE；`sim.py` — 再导出垫片（导入走 `from .sim import World`）
 - `static/` — `index.html`（主画布视图）、`gallery.html`（图鉴）、`sprites.html`、`ants.js`（共享精灵）
 
 ## 不变量（破坏后静默失效）

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .constants import DIRT, SURFACE, TUNNEL, W
+from .detect import Detector
 from .world import World
 
 def smoke(ticks: int = 6000) -> None:
@@ -56,11 +57,15 @@ def smoke(ticks: int = 6000) -> None:
     w3 = World(seed=5)
     food_peak = 0.0  # 后期(20000t+)粮室存粮峰值：紧经济下存粮贴近消耗，末刻单快照会误报
     rooms_with_food_peak = 0
+    det = Detector(every=1000)  # 阶段12：扎堆/徘徊回归门禁（纯读取，不影响确定性）
     # 50000t：动态房随种群出现、走廊施工需 5-15k，末批房（13/14 间）在 35k 时仍在挖属
     # 瞬时施工态（2026-10-10 实测 seed5：room12 于 40-50k 间、room13 于 45-50k 间 linked），
     # 多给时间让"全部连通"断言不卡在临时状态
     for _ in range(50000):
         w3.tick()
+        det.step(w3)
+        if w3.tick_count % det.every == 0:
+            det.check(w3)
         if w3.tick_count >= 20000:
             fsum = sum(ch["store"] for ch in w3.colonies[0].chambers if ch.get("kind") == "food")
             food_peak = max(food_peak, fsum)
@@ -84,7 +89,9 @@ def smoke(ticks: int = 6000) -> None:
     assert n_food >= 2 and n_sleep >= 3, f"phase10: multi rooms missing (food={n_food} sleep={n_sleep})"
     assert food_peak > 50, f"phase10: food not stored in rooms (peak_in_rooms={food_peak:.0f})"
     assert rooms_with_food >= 2, f"phase10: food not distributed across rooms (n={rooms_with_food})"
+    assert not det.alarms, f"phase12 detect: 蚂蚁扎堆/徘徊回归 {det.alarms}"
     print(
         f"PHASE9 OK  rooms {len(c3.chambers)} (dyn {len(dyn)})  far_dyn {far_dyn:.0f}  pop {c3.population}  "
-        f"food_rooms {n_food}(峰值{rooms_with_food}有粮,存粮峰{food_peak:.0f})  sleep_rooms {n_sleep}"
+        f"food_rooms {n_food}(峰值{rooms_with_food}有粮,存粮峰{food_peak:.0f})  sleep_rooms {n_sleep}  "
+        f"detect clean"
     )
