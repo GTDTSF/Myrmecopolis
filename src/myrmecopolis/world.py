@@ -938,13 +938,13 @@ class World:
         ):
             a.resting = True
         if a.resting:
-            a.fatigue = max(0.0, a.fatigue - REST_RECOVER)
+            a.fatigue = max(0.0, a.fatigue - REST_RECOVER * a.pace)  # *pace：个体节律→恢复快慢各异→去同步
             if at_home:
                 a.energy = min(150.0, a.energy + REST_REGEN)  # 睡室内休息：额外被动回血
             if a.fatigue <= REST_MIN_FAT:
                 a.resting = False  # 歇够了→复工
         else:
-            a.fatigue = min(FATIGUE_MAX, a.fatigue + FATIGUE_RATE)  # 干活→累
+            a.fatigue = min(FATIGUE_MAX, a.fatigue + FATIGUE_RATE * a.pace)  # 干活→累（*pace：累快慢各异）
         a.energy -= 0.03
         if a.energy < 50 and not a.resting and col.store >= 1 and (a.age + a.eat_offset) % 30 == 0:
             self._take_food(col, 1)  # 领食：1 食物换 40 能量（慢代谢：更耐饿、寿命更长）
