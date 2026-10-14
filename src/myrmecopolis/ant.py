@@ -9,7 +9,7 @@ class Ant:
     __slots__ = (
         "x", "y", "d", "state", "hp", "energy", "role", "colony", "food",
         "building", "breaking", "maintaining", "resting", "fatigue", "age", "max_age", "eat_offset", "uid",
-        "egg", "pace",
+        "egg", "pace", "size", "carry",
     )
 
     def __init__(self, x: int, y: int, role: int, colony: int, rng: random.Random) -> None:
@@ -36,6 +36,12 @@ class Ant:
         self.eat_offset = rng.randrange(20)
         # 2026-10-10 收敛破除：每蚁代谢节律（等比缩放疲劳积累/恢复）→工作休息周期各不相同→全群去同步
         self.pace = 1.0 + rng.uniform(-INDIV_VARIATION, INDIV_VARIATION)
+        # 2026-10-10 基因随机（同 pace，按种子派生、确定性）：体型缩放能耗（大蚁更勤觅食）+
+        # 前端渲染尺寸；搬运量缩放每趟取食（大蚁一趟搬更多）。均值 1.0 不变→不扰经济。
+        # 注：不给"移动步频"加随机——变速蚁会在窄瓶颈处互相堵成拥塞（实测 seed5@39k 单格 22 只），
+        # 与"破除聚集"目标相悖，故移动速度保持同质、只让代谢/体型/搬运各异。
+        self.size = 1.0 + rng.uniform(-INDIV_VARIATION, INDIV_VARIATION)
+        self.carry = 1.0 + rng.uniform(-INDIV_VARIATION, INDIV_VARIATION)
         self.egg = None  # 阶段11：正搬运的卵（dict 引用，随蚁移动）
         self.uid = Ant._next_uid
         Ant._next_uid += 1

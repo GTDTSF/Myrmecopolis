@@ -144,11 +144,11 @@ function initAnts(){
 // 蚂蚁渲染缩放：1.0=原生像素（不缩放，保细节）；改"蚂蚁大小比例"靠扩大地图 S（见 index.html），不缩精灵
 const ANT_SCALE=1.0;
 // 以 (px,py) 为中心、按 angle（弧度）旋转绘制
-function drawAnt(ctx,px,py,caste,colony,carrying,angle){
+function drawAnt(ctx,px,py,caste,colony,carrying,angle,sz=1){
   const base=caste==="soldier"?SPRITES.soldier[colony].move:SPRITES.worker[colony][carrying?"carry":"move"];
   ctx.save();
   ctx.translate(px,py);
-  ctx.scale(ANT_SCALE,ANT_SCALE);
+  ctx.scale(ANT_SCALE*sz,ANT_SCALE*sz);
   ctx.rotate(angle);
   ctx.drawImage(base,-base.width/2,-base.height/2);
   ctx.restore();

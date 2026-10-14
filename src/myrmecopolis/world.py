@@ -946,7 +946,7 @@ class World:
                 a.resting = False  # 歇够了→复工
         else:
             a.fatigue = min(FATIGUE_MAX, a.fatigue + FATIGUE_RATE * a.pace)  # 干活→累（*pace：累快慢各异）
-        a.energy -= 0.03
+        a.energy -= 0.03 * a.size  # *size：体型各异→能耗不同→大蚁更勤觅食（均值 1.0 不变，不扰经济）
         if a.energy < 50 and not a.resting and col.store >= 1 and (a.age + a.eat_offset) % 30 == 0:
             self._take_food(col, 1)  # 领食：1 食物换 40 能量（慢代谢：更耐饿、寿命更长）
             a.energy = min(150.0, a.energy + 40)
@@ -1292,7 +1292,7 @@ class World:
         if a.state == CARRY:
             self.food_p[best_i] = 255
         if a.state == SEEK and food[best_i] > 0 and not a.maintaining and a.egg is None:
-            take = min(14, food[best_i])  # 增大食物体积：每趟搬运量更大（吞吐↑，群落能长大→巢扩张）
+            take = min(round(14 * a.carry), food[best_i])  # *carry：个体搬运量各异（round 保 int 供 bytearray；均值≈14 吞吐稳）
             food[best_i] -= take
             a.food = take
             a.state = CARRY
@@ -1318,7 +1318,7 @@ class World:
             a.egg = None
 
     def frame(self) -> dict:
-        ants = [[a.uid, a.x, a.y, a.colony, a.state, a.role, a.d, a.maintaining, a.resting] for c in self.colonies for a in c.ants]
+        ants = [[a.uid, a.x, a.y, a.colony, a.state, a.role, a.d, a.maintaining, a.resting, a.size] for c in self.colonies for a in c.ants]
         # 阶段7.4：三阶段幼体，带阶段标记（0=卵 1=幼虫 2=蛹）供前端分色渲染
         larvae = (
             [[e["x"], e["y"], 0] for c in self.colonies for e in c.eggs]

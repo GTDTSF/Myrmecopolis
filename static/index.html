@@ -76,7 +76,7 @@ function drawActors(a,l,q){
     }
   }
   const seen=new Set();
-  for(const [uid,x,y,c,st,caste,dir,maint,rest] of a){
+  for(const [uid,x,y,c,st,caste,dir,maint,rest,sz] of a){
     seen.add(uid);
     const tgt=AANG[dir];
     let cur=angState.get(uid);
@@ -86,7 +86,7 @@ function drawActors(a,l,q){
     while(d<-Math.PI)d+=2*Math.PI;
     cur+=d*0.35; // 指数趋近，约 200ms 完成转向
     angState.set(uid,cur);
-    drawAnt(ctx,(x+0.5)*S,(y+0.5)*S,caste===1?"soldier":"worker",c,st===1,cur);
+    drawAnt(ctx,(x+0.5)*S,(y+0.5)*S,caste===1?"soldier":"worker",c,st===1,cur,sz);
     if(rest){ // 休息蚁：zzz 睡眠特效（干累了回蚁巢歇脚）
       const ph=performance.now()/550 + uid*0.7;
       ctx.save();
