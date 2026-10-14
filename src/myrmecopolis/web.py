@@ -20,6 +20,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")  # 静态页/脚本不缓存：改前端后普通刷新即生效
         self.end_headers()
         self.wfile.write(body)
 
