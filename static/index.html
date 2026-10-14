@@ -84,7 +84,7 @@ function drawActors(a,l,q){
     let d=tgt-cur;
     while(d>Math.PI)d-=2*Math.PI;
     while(d<-Math.PI)d+=2*Math.PI;
-    cur+=d*0.35; // 指数趋近，约 200ms 完成转向
+    cur+=d*0.15; // 指数趋近放慢（约 0.4s）：方向逐 tick 微调时朝向平滑过渡、不逐帧追抖（用户"反复抽搐"）
     angState.set(uid,cur);
     drawAnt(ctx,(x+0.5)*S,(y+0.5)*S,caste===1?"soldier":"worker",c,st===1,cur,sz);
     if(rest){ // 休息蚁：zzz 睡眠特效（干累了回蚁巢歇脚）
