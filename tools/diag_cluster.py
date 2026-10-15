@@ -1,57 +1,79 @@
-"""诊断位置聚集：蚂蚁堆在哪、堆的是什么状态（歇/搬运/挖/觅食）。"""
+"""临时诊断：聚集(单格/5×5区域/休息分布) + 方向震荡(A-B-A) + 承诺生效情况。用法：uv run tools/diag_cluster.py [ticks] [seed]"""
 import sys
 from collections import Counter
+
 sys.path.insert(0, "src")
 from myrmecopolis.world import World
-from myrmecopolis.constants import SURFACE, SEEK, CARRY, WANDER
+from myrmecopolis.detect import Detector
 
-w = World(seed=5)
-col = w.colonies[0]
-T = int(sys.argv[1]) if len(sys.argv) > 1 else 80000
-for t in range(T):
-    w.tick()
 
-cell_ants = Counter()
-for a in col.ants:
-    cell_ants[(a.x, a.y)] += 1
+def main() -> None:
+    ticks = int(sys.argv[1]) if len(sys.argv) > 1 else 30000
+    seed = int(sys.argv[2]) if len(sys.argv) > 2 else 5
+    w = World(seed=seed)
+    det = Detector(every=200)
+    c = w.colonies[0]
 
-n = len(col.ants)
-print(f"t={T//1000}k pop={n}  占据格数={len(cell_ants)}  单格最多={max(cell_ants.values())}")
+    peak_cell, peak_region, peak_wander = 0, 0, 0
+    osc_total, osc_samples = 0, 0
+    rest_in, rest_out, rest_total = 0, 0, 0
+    commit_avg_hist = []
 
-antpos = {}
-for a in col.ants:
-    antpos.setdefault((a.x, a.y), []).append(a)
+    for t in range(1, ticks + 1):
+        w.tick()
+        det.step(w)
+        if t % 200 == 0:
+            r = det.check(w)
+            peak_cell = max(peak_cell, r["max_cell"])
+            peak_region = max(peak_region, r.get("max_region5", 0))
+            peak_wander = max(peak_wander, r["n_wander"])
+            ants = c.ants
+            rest_total = sum(1 for a in ants if a.resting)
+            rest_in = sum(1 for a in ants if a.resting and c.in_sleep_room(a.x, a.y))
+            rest_out = rest_total - rest_in
+            commit_avg_hist.append(sum(getattr(a, "commit", 0) for a in ants) / max(1, len(ants)))
+        # 震荡采样：每 500 tick 抓 30 tick 的方向序列，数 A-B-A 折返
+        if t % 500 == 470:
+            seq = {}
+            for _ in range(30):
+                if _ == 0:
+                    seq = {a.uid: [a.d] for a in c.ants}
+                else:
+                    for a in c.ants:
+                        if a.uid in seq:
+                            seq[a.uid].append(a.d)
+                w.tick()
+            n_reversal = 0
+            n_changew = 0
+            n_ant = 0
+            for uid, s in seq.items():
+                if len(s) < 30:
+                    continue
+                n_ant += 1
+                chg = sum(1 for i in range(1, 30) if s[i] != s[i - 1])
+                rev = sum(1 for i in range(2, 30) if s[i] == s[i - 2] and s[i] != s[i - 1])
+                n_changew += chg
+                if rev >= 3:
+                    n_reversal += 1
+            osc_total += n_reversal / max(1, n_ant)
+            osc_samples += 1
 
-top = cell_ants.most_common(12)
-print("\n最密 12 格 (数量 坐标 深度 状态分布 疲劳区间):")
-for (x, y), c in top:
-    ants = antpos[(x, y)]
-    st = Counter()
-    for a in ants:
-        if a.resting: st['歇'] += 1
-        elif a.egg is not None: st['运卵'] += 1
-        elif a.state == CARRY and a.food: st['运'] += 1
-        elif a.building: st['挖'] += 1
-        elif a.maintaining: st['护'] += 1
-        elif a.state == SEEK: st['觅'] += 1
-        elif a.state == WANDER: st['游'] += 1
-        else: st[f'S{a.state}'] += 1
-    fats = [a.fatigue for a in ants]
-    print(f"  {c:3d}  ({x:3d},{y:3d}) 深{y-SURFACE:3d}  {dict(st)}  疲{min(fats):.0f}-{max(fats):.0f}")
+    print(f"=== seed={seed} ticks={ticks} ===")
+    print(f"pop={c.population} store={int(c.store)} food_gained={c.food_gained:.0f}")
+    print(f"峰值 单格={peak_cell}  5×5区域={peak_region}  徘徊={peak_wander}")
+    print(f"休息蚁: 总{rest_total}  睡室内{rest_in}  睡室外{rest_out}")
+    # 睡室分布
+    for j, ch in enumerate(c.sleep_rooms):
+        n = sum(1 for a in c.ants if (a.x - ch["cx"]) ** 2 / (ch["rx"] ** 2) + (a.y - ch["cy"]) ** 2 / (ch["ry"] ** 2) <= 1)
+        nrest = sum(1 for a in c.ants if a.resting and (a.x - ch["cx"]) ** 2 / (ch["rx"] ** 2) + (a.y - ch["cy"]) ** 2 / (ch["ry"] ** 2) <= 1)
+        print(f"  睡室{j} @({ch['cx']},{ch['cy']}) r=({ch['rx']},{ch['ry']})  占用{n} 休息{nrest}")
+    if osc_samples:
+        print(f"震荡: {osc_total / osc_samples:.2f} 只/样本（≥3 次 A-B-A 折返的蚁占比，样本{osc_samples}）")
+    if commit_avg_hist:
+        print(f"commit 均值: 末段 {sum(commit_avg_hist[-10:]) / 10:.2f}（>0 表示承诺机制在起作用）")
+    print(f"=== 报警 {len(det.alarms)} 条 ===")
+    for tick, kind, msg in det.alarms[:20]:
+        print(f"  t={tick//1000:>3}k [{kind}] {msg}")
 
-dist = Counter()
-for c in cell_ants.values():
-    dist['1' if c == 1 else '2' if c == 2 else '3-4' if c <= 4 else '5-8' if c <= 8 else '9+'] += 1
-clustered = sum(c for c in cell_ants.values() if c >= 3)
-print(f"\n格占用分布: {dict(dist)}")
-print(f"处于 ≥3 蚁格中的蚂蚁: {clustered}/{n} ({100*clustered/n:.0f}%)")
 
-# 休息蚁的空间分布（是不是歇在同样的几个点）
-rest_cells = Counter()
-for a in col.ants:
-    if a.resting:
-        rest_cells[(a.x, a.y)] += 1
-if rest_cells:
-    print(f"\n休息蚁 {sum(rest_cells.values())} 只，占 {len(rest_cells)} 格，单格最多 {max(rest_cells.values())}")
-    for (x, y), c in rest_cells.most_common(6):
-        print(f"   {c:3d}  ({x:3d},{y:3d}) 深{y-SURFACE:3d}")
+main()

@@ -494,6 +494,59 @@ class World:
                 bd, best = d, (tx, ty)
         return best
 
+    # 阶段13 路线规划：在挖好的通路里给非挖掘蚁 BFS 一条整线，逐格沿走。
+    # 可走格 = 地表(皆 TUNNEL) + 地下已标记蚁穴格(nest_mark)；土/岩/封土/探索网(未标记)不可走
+    # ——与 _step_ant 通行判定一致（非挖掘蚁不走 DIRT、不进探索网）。
+    def _path_cell_ok(self, x: int, y: int, col: Colony) -> bool:
+        i = y * W + x
+        t = self.terrain[i]
+        if t == ROCK or t == DIRT:
+            return False
+        if i in col.sealed:
+            return False
+        if y >= SURFACE and not self.nest_mark[i]:
+            return False  # 探索网（地底未标记隧道）：非挖掘蚁禁入
+        return True
+
+    @staticmethod
+    def _dir_between(x0: int, y0: int, x1: int, y1: int) -> int | None:
+        dx, dy = x1 - x0, y1 - y0
+        for d in range(8):
+            if DIRS[d] == (dx, dy):
+                return d
+        return None
+
+    def find_path(self, sx: int, sy: int, tx: int, ty: int, col: Colony) -> list[tuple[int, int]] | None:
+        """BFS 最短路（8 向，只走已挖通路）。返回 [(x,y)...] 起点→终点，无路径返回 None。"""
+        if (sx, sy) == (tx, ty):
+            return [(sx, sy)]
+        if not self._path_cell_ok(tx, ty, col):
+            return None
+        start, goal = sy * W + sx, ty * W + tx
+        prev = {start: -1}
+        q = deque([start])
+        while q:
+            i = q.popleft()
+            if i == goal:
+                path = []
+                j = i
+                while j != -1:
+                    path.append((j % W, j // W))
+                    j = prev[j]
+                path.reverse()
+                return path
+            x, y = i % W, i // W
+            for dx, dy in DIRS:
+                nx, ny = x + dx, y + dy
+                if not (0 <= nx < W and 0 <= ny < H):
+                    continue
+                ni = ny * W + nx
+                if ni in prev or not self._path_cell_ok(nx, ny, col):
+                    continue
+                prev[ni] = i
+                q.append(ni)
+        return None
+
     def tick(self) -> None:
         self.tick_count += 1
         rng = self.rng
@@ -645,27 +698,46 @@ class World:
             col.sleep_rooms = [ch for ch in col.chambers if ch.get("kind") == "sleep"]
             col.sleep_target = None
             if col.sleep_rooms:
-                occ = [0] * len(col.sleep_rooms)
+                n = len(col.sleep_rooms)
+                occ = [0] * n
+                inbound = [0] * n
                 for a in col.ants:
+                    if 0 <= a.sleep_room < n:
+                        inbound[a.sleep_room] += 1
                     for j, ch in enumerate(col.sleep_rooms):
                         rx, ry = ch["rx"], ch["ry"]
                         if (a.x - ch["cx"]) ** 2 / (rx * rx) + (a.y - ch["cy"]) ** 2 / (ry * ry) <= 1:
                             occ[j] += 1
+                # 阶段12：在途认领一并计入负载——蚂蚁常在房界**外**歇脚（占用统计漏计），
+                # 只按 occ 选房会让同一间永远"最空"→持续流入→入口带堆大群（用户所见"全卡死一处"）
+                col.sleep_occ = occ
+                col.sleep_inbound = inbound
                 col.sleep_target = col.sleep_rooms[occ.index(min(occ))]
                 # 睡室必须挖出可用面积才许当休息目标：未挖的睡室是土椭圆，拽过去=罢工（2026-10-10 开井期全灭根因）
                 col.sleep_ready = self.room_capacity(col, col.sleep_target) >= 20
             else:
+                col.sleep_occ = []
+                col.sleep_inbound = []
                 col.sleep_ready = False
             col.brood_room = next((ch for ch in col.chambers if ch.get("kind") == "brood"), None)
             col.food_rooms = [ch for ch in col.chambers if ch.get("kind") == "food"]
-            col.food_target = (
-                min(
-                    col.food_rooms,
-                    key=lambda ch: ch["store"] / max(1.0, self.room_capacity(col, ch) * FOOD_PER_CELL),
-                )
-                if col.food_rooms
-                else None
-            )
+            # 阶段13：加迟滞防"最空房"逐 tick 来回翻——载体卸粮抬升当前房占比→目标抖动→
+            # 全体载体路线逐 tick 重算（BFS 成本爆炸，实测 10k 处 81ms/tick）。仅当别的房"明显更空"
+            # （占比低 0.05 以上）才切换；均分意图不变（房装满自然轮到下一间）。
+            if col.food_rooms:
+
+                def _full(ch):
+                    return ch["store"] / max(1.0, self.room_capacity(col, ch) * FOOD_PER_CELL)
+
+                _cur = col.food_target
+                if _cur is None or _cur not in col.food_rooms:
+                    col.food_target = min(col.food_rooms, key=_full)
+                else:
+                    _best = min(col.food_rooms, key=_full)
+                    if _best is not _cur and _full(_best) < _full(_cur) - 0.05:
+                        col.food_target = _best
+            else:
+                col.food_target = None
         if self.tick_count % MAINTAIN_EVERY == 0:  # 重扫塌陷 → 维护蚁修复目标
             # 维护蚁的窄逻辑：只修"塌了的房格"（已挖房格变土），不碰走廊/竖井，更不挖随机土——
             # 否则维护蚁变成全巢挖掘工，蚁穴越修越大
@@ -938,6 +1010,8 @@ class World:
             and occ.get((a.x, a.y), 0) < REST_CROWD_MAX  # 本格已挤→不歇，走到安静格再歇（防同格堆叠）
         ):
             a.resting = True
+            if a.sleep_room >= 0:
+                a.sleep_room = -1  # 已就地歇脚，不再需要睡室（在途计数由下 tick 重算自动冲销）
         if a.resting:
             a.fatigue = max(0.0, a.fatigue - REST_RECOVER * a.pace)  # *pace：个体节律→恢复快慢各异→去同步
             if at_home:
@@ -1066,6 +1140,53 @@ class World:
         cands = (prev - 1, prev, prev + 1)
         if a.egg is not None:
             cands = cands + (prev + 4,)  # 抱卵允许 180° 掉头（直行惯性下直行走廊会走到地表才回头，白跑一趟）
+        st = None
+        if (
+            a.egg is None
+            and not (a.state == CARRY and a.food)
+            and a.fatigue >= FATIGUE_MAX
+            and col.sleep_ready  # 睡室已挖出可用面积（未挖=土椭圆，拽过去=罢工）
+            and a.y >= SURFACE
+            and (abs(a.x - col.qx) + abs(a.y - col.qy)) <= 90  # 覆盖最外围动态睡室（房距 ≤76+房半径）
+        ):
+            # 阶段12：每蚁各认领一间睡室（"占用+在途"最少者，距离破平）→同批累倒的蚁摊到多间。
+            # 旧全局 sleep_target 单间：休息蚁常在房界外歇脚→occ 漏计→该房永远"最空"→
+            # 持续流入→入口带堆 ~50 只（用户所见"全卡死一处"）。在途即时计数→同 tick 后续蚁换房。
+            n = len(col.sleep_rooms)
+            if n and (a.sleep_room < 0 or a.sleep_room >= n):
+                r = min(
+                    range(n),
+                    key=lambda j: (
+                        col.sleep_occ[j] + col.sleep_inbound[j],
+                        abs(a.x - col.sleep_rooms[j]["cx"]) + abs(a.y - col.sleep_rooms[j]["cy"]),
+                    ),
+                )
+                a.sleep_room = r
+                col.sleep_inbound[r] += 1
+            st = col.sleep_rooms[a.sleep_room]
+        # 阶段13：当前"预定路线"的终点（BFS 目标）。BFS 自带迷宫解→CARRY 直接定粮室
+        # （旧两段 hub 逻辑是直线梯度时代的补丁，已删）。SEEK 地下段终点=地表入口格
+        # (qx, SURFACE-1)：到 (qx,3) 就路径耗尽上不了地表，须把终点放到地表首格，
+        # 蚁踏上地表后 y<SURFACE → tp 自动切最近食物簇。
+        tp = None
+        if st is not None:
+            tp = (st["cx"], st["cy"])
+        elif a.egg is not None and not a.resting:
+            if a.y < SURFACE:
+                tp = (col.qx, SURFACE)
+            elif col.brood_room is not None:
+                tp = (col.brood_room["cx"], col.brood_room["cy"])
+        elif a.state == CARRY and not a.resting:
+            ft = col.food_target
+            if a.y < SURFACE:
+                tp = (col.qx, SURFACE)
+            else:
+                tp = (ft["cx"], ft["cy"]) if ft is not None else (col.qx, col.qy)
+        elif a.state == SEEK and not a.maintaining and not a.resting and a.egg is None:
+            if a.y < SURFACE and target is not None:
+                tp = (target[0], target[1])
+            else:
+                tp = (col.qx, SURFACE - 1)  # 地下觅食蚁：汇主竖井→上地表入口格
         for dd in cands:
             d = dd % 8
             nx = a.x + DIRS[d][0]
@@ -1245,28 +1366,57 @@ class World:
                     score -= (abs(nx - col.qx) + abs(ny - col.qy)) * 0.3
             if a.resting:
                 # 阶段10：休息蚁留在睡室歇脚（目标=占用最少的睡室→多间均分，不挤一间）
-                st = col.sleep_target
-                if st is not None:
-                    score -= (abs(nx - st["cx"]) + abs(ny - st["cy"])) * 0.5
-            elif (
-                a.egg is None
-                and not (a.state == CARRY and a.food)
-                and a.fatigue >= FATIGUE_MAX
-                and col.sleep_ready  # 睡室已挖出可用面积（未挖=土椭圆，拽过去=罢工）
-                and a.y >= SURFACE
-                and (abs(a.x - col.qx) + abs(a.y - col.qy)) <= 90  # 覆盖最外围动态睡室（房距 ≤76+房半径）
-            ):
-                # 阶段7.3/10：累了(疲劳满)且在巢内→走向目标睡室（最空那间）歇脚。
+                rt = col.sleep_target
+                if rt is not None:
+                    score -= (abs(nx - rt["cx"]) + abs(ny - rt["cy"])) * 0.5
+            elif st is not None:
+                # 阶段7.3/12：累了(疲劳满)且在巢内→走向**自己认领的**睡室歇脚。
                 # 2026-10-10 修复疲劳陷阱：旧 0.3 < 直行惯性 0.6，疲劳蚁根本转向不了睡室，
                 # 在巢里带满疲劳打转直到老死（seed5 实测 41 蚁 30 疲劳满、0 在睡室→群落塌缩）。
                 # 梯度须 > 直行惯性 0.6 + 觅食上偏置 1.0 才能拽动疲劳蚁：1.2。
-                st = col.sleep_target
+                # 阶段12：st=该蚁认领房（"占用+在途"最少，见循环前认领逻辑），非全局单间→摊开不堆。
                 score -= (abs(nx - st["cx"]) + abs(ny - st["cy"])) * 1.2
             if score > best_score:
                 best_score, best_i, best_d = score, i, d
         if best_i is None:
             a.d = (a.d + rng.randrange(1, 3)) % 8
             return
+        # 阶段13 路线规划：非挖掘蚁沿"在挖好的通路里画好的一条线"（BFS 最短路）逐格走——
+        # 整条路线一次定好→流畅、不撞墙、不折返、不逐 tick 抖动（"抽搐/卡死一处"根因修复）。
+        # 挖掘蚁（nesting，要挖新土、无预设通路）与巡逻的维护蚁保持打分兜底。
+        # 路径须同时满足：目标未变、蚁还在路径上、下一格仍可走——否则从当前位置重算
+        # （塌陷封路/目标切换/角色切换自动自愈）。
+        if not nesting and not a.maintaining and tp is not None:
+            if (a.x, a.y) == tp:
+                # 已站在目标上：路径耗尽，无需 BFS（否则每 tick 白算一条平凡路径）；
+                # 清掉旧路径，靠打分兜底就地行为（拾粮/卸粮后 tp 变化再重新规划）
+                a.path = None
+                a.path_i = 0
+                a.path_target = None
+            else:
+                p = a.path
+                ok = (
+                    p is not None
+                    and a.path_target == tp
+                    and a.path_i < len(p)
+                    and p[a.path_i] == (a.x, a.y)
+                    and a.path_i + 1 < len(p)
+                    and self._path_cell_ok(p[a.path_i + 1][0], p[a.path_i + 1][1], col)
+                )
+                if not ok:
+                    p = self.find_path(a.x, a.y, tp[0], tp[1], col)
+                    a.path = p
+                    a.path_i = 0
+                    a.path_target = tp
+                    ok = p is not None and a.path_i + 1 < len(p)
+                if ok:
+                    nxp, nyp = p[a.path_i + 1]
+                    # 拥挤门：同一条路的蚁会在瓶颈格（竖井口/走廊交汇）汇流堆死——
+                    # 路径不看 CROWD_P，下一格已挤(≥REST_CROWD_MAX)就放弃本 tick 沿路径，
+                    # 退回打分兜底（CROWD_P 会绕开挤格），蚁自然分流（实测无此门单格堆 17）
+                    if occ.get((nxp, nyp), 0) < REST_CROWD_MAX:
+                        best_i = nyp * W + nxp
+                        best_d = self._dir_between(a.x, a.y, nxp, nyp)
         a.d = best_d
         nx, ny = best_i % W, best_i // W
         if self.terrain[best_i] == DIRT:
@@ -1282,6 +1432,9 @@ class World:
             src = 0  # 走已有隧道，_dig 不会改写
         self._dig(nx, ny, src)
         a.x, a.y = nx, ny
+        # 路线推进：确实走到路径下一格才前进（WALK_P 没触发时不跳格）
+        if a.path is not None and a.path_i + 1 < len(a.path) and a.path[a.path_i + 1] == (a.x, a.y):
+            a.path_i += 1
         if a.egg is not None:
             a.egg["x"], a.egg["y"] = nx, ny  # 卵随工蚁移动
         occ[(nx, ny)] = occ.get((nx, ny), 0) + 1  # 实时占用：同 tick 内后来者避开

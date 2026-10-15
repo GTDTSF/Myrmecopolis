@@ -18,6 +18,8 @@ class Colony:
         self.queen_resting = False  # 阶段7.2：蚁后睡眠状态（睡时暂停产卵）
         self.queen_rest_t = QUEEN_WAKE  # 蚁后睡/醒周期计时（到 0 切换状态）
         self.sleep_rooms: list = []  # 阶段10：多个睡室（每 tick 按 kind=sleep 重算）
+        self.sleep_occ: list = []    # 阶段12：各睡室当前占用数（每 tick 重算）
+        self.sleep_inbound: list = []  # 阶段12：各睡室在途认领数（每 tick 重算；蚁认领时即时 +1）
         self.sleep_target = None  # 阶段10：休息目标睡室（占用最少→强制均分到不同房）
         self.sleep_ready = False  # 目标睡室已挖出可用面积（≥20 格）——没挖出来前疲劳蚁不转向去（防开井期罢工）
         self.brood_room: dict | None = None  # 阶段11：育虫室（kind=brood，每 tick 重算；卵的最终去处）

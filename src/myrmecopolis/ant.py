@@ -9,7 +9,7 @@ class Ant:
     __slots__ = (
         "x", "y", "d", "state", "hp", "energy", "role", "colony", "food",
         "building", "breaking", "maintaining", "resting", "fatigue", "age", "max_age", "eat_offset", "uid",
-        "egg", "pace", "size", "carry",
+        "egg", "pace", "size", "carry", "sleep_room", "path", "path_i", "path_target",
     )
 
     def __init__(self, x: int, y: int, role: int, colony: int, rng: random.Random) -> None:
@@ -43,6 +43,13 @@ class Ant:
         self.size = 1.0 + rng.uniform(-INDIV_VARIATION, INDIV_VARIATION)
         self.carry = 1.0 + rng.uniform(-INDIV_VARIATION, INDIV_VARIATION)
         self.egg = None  # 阶段11：正搬运的卵（dict 引用，随蚁移动）
+        # 阶段12：已认领睡室索引（-1=无）。疲劳蚁各认领"占用+在途最少"的房→摊开，不再全涌一间。
+        self.sleep_room = -1
+        # 阶段13：路线规划——在挖好的通路里 BFS 出的整条路线（"提前画好一条线"），
+        # 逐格沿走→不撞墙、不折返、不震荡。path_target=算路线时的目标（变了/路断了重算）。
+        self.path = None
+        self.path_i = 0
+        self.path_target = None
         self.uid = Ant._next_uid
         Ant._next_uid += 1
 

@@ -12,18 +12,23 @@ class Detector:
           且窗口(40t)内几乎原地不动的蚁 ≥ wander_min（默认 15）只——即"累满却歇不下、
           原地空转"的蚁（历史 bug 签名：疲劳大群徘徊 108 只 / 竖井堵口 23 只）。
           阈值 15 卡在"健康 0-3 + 偶发瞬峰 10"与"真 bug 23+"之间。
+     区域扎堆：5×5 窗口内蚂蚁总数 > region_max（默认 32）——用户视角的"一堆"：单格都 ≤10
+           但一小片里挤成一团。阈值 32 卡在健康值（BFS 路线规划后 ~26）与 bug 值
+           （睡室入口带 38-50，2026-10-14）之间。
     纯读取世界状态，**无 RNG 调用**→不影响确定性。每个世界新建一个实例
     （uid 是跨世界单调计数器，复用实例会串味）。
     """
 
     def __init__(self, every: int = 1000, window: int = 40, cluster_max: int = 10,
-                 wander_min: int = 15, wander_disp: int = 4, fat_min: float = 100.0):
+                 wander_min: int = 15, wander_disp: int = 4, fat_min: float = 100.0,
+                 region_max: int = 32):
         self.every = every
         self.window = window
         self.cluster_max = cluster_max
         self.wander_min = wander_min
         self.wander_disp = wander_disp
         self.fat_min = fat_min
+        self.region_max = region_max
         self._hist: dict = {}   # uid -> deque[(x, y)]
         self.alarms: list = []  # [(tick, 类别, 说明)]
         self.last = None
@@ -76,15 +81,28 @@ class Detector:
         else:
             max_cell, cx, cy = 0, 0, 0
         wander = self._wanderers(w)
+        region = 0
+        region_at = (0, 0)
+        if cell:
+            for (x, y) in cell:
+                s = 0
+                for dx in range(-2, 3):
+                    for dy in range(-2, 3):
+                        s += cell.get((x + dx, y + dy), 0)
+                if s > region:
+                    region, region_at = s, (x, y)
         rep = {
             "tick": w.tick_count, "pop": n,
             "max_cell": max_cell, "cluster_at": (cx, cy),
+            "max_region5": region, "region_at": region_at,
             "n_wander": len(wander),
             "wander_at": [(a.x, a.y) for a in wander[:5]],
         }
         self.last = rep
         if n and max_cell > self.cluster_max:
             self.alarms.append((w.tick_count, "扎堆", f"单格{max_cell}只@({cx},{cy})"))
+        if n and region > self.region_max:
+            self.alarms.append((w.tick_count, "区域扎堆", f"5×5窗口内{region}只@{region_at}"))
         if len(wander) >= self.wander_min:
             self.alarms.append((w.tick_count, "徘徊", f"{len(wander)}只高疲劳原地空转"))
         return rep
