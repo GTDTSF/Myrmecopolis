@@ -8,7 +8,7 @@ from collections import deque
 
 from .ant import Ant
 from .colony import Colony
-from .constants import W, H, SURFACE, ROCK, DIRT, TUNNEL, DIRS, SEEK, CARRY, WORKER, SOLDIER, MAX_POP, FOOD_CAP, FOOD_DROP_P, FOOD_DROP_MIN, FOOD_DROP_MAX, FOOD_SCAN_EVERY, FOOD_BAND, WALK_P, DIG_P, NEST_TARGET, NEST_RADIUS, CHAMBER_BIAS, SHAFT_BIAS, NEST_GROW_EVERY, MAX_CHAMBERS, PATH_BIAS, RECLAIM_K, RECLAIM_P, MAINTAIN_EVERY, MAINTAINER_MAX, ROOM_DECAY_P, CROWD_P, FOOD_PER_CELL, FATIGUE_RATE, FATIGUE_MAX, REST_RECOVER, REST_MIN_FAT, REST_REGEN, REST_CROWD_MAX, DAY, QUEEN_NAP, QUEEN_WAKE, EGG_TIME, LARVA_TIME, PUPA_TIME, BRIDGE_BIAS, EXPLORER_MOD, WEB_CAP, WEB_RADIUS, ORPHAN_SWEEP_EVERY
+from .constants import W, H, SURFACE, ROCK, DIRT, TUNNEL, DIRS, SEEK, CARRY, WORKER, SOLDIER, MAX_POP, FOOD_CAP, FOOD_DROP_P, FOOD_DROP_MIN, FOOD_DROP_MAX, FOOD_SCAN_EVERY, FOOD_BAND, WALK_P, DIG_P, NEST_TARGET, NEST_RADIUS, CHAMBER_BIAS, SHAFT_BIAS, NEST_GROW_EVERY, MAX_CHAMBERS, PATH_BIAS, RECLAIM_K, RECLAIM_P, MAINTAIN_EVERY, MAINTAINER_MAX, ROOM_DECAY_P, CROWD_P, FOOD_PER_CELL, FATIGUE_RATE, FATIGUE_MAX, REST_RECOVER, REST_MIN_FAT, REST_REGEN, REST_CROWD_MAX, DAY, QUEEN_NAP, QUEEN_WAKE, EGG_TIME, LARVA_TIME, PUPA_TIME, BRIDGE_BIAS, EXPLORER_MOD, WEB_CAP, WEB_RADIUS, ORPHAN_SWEEP_EVERY, HUNGER_RATE, HUNGER_MAX, EAT_TIME, EAT_ENERGY, EAT_FOOD, EAT_CROWD_MAX, PATH_RETRY
 
 def _b64(b: bytearray) -> str:
     return base64.b64encode(bytes(b)).decode()
@@ -492,6 +492,22 @@ class World:
             d = abs(tx - x)
             if d < bd:
                 bd, best = d, (tx, ty)
+        return best
+
+    def _eat_room(self, col: Colony, x: int, y: int) -> dict | None:
+        """阶段14 进食目标房：优先"蚂蚁正处在的粮室"，否则最近的（有粮、已连通）粮室。
+        与卸粮用的 food_target（全群最空房、负载均衡）不同——吃饭是就近取食，避免全群饿蚁
+        长途奔向同一间远房（实测 37% 蚁在赶路、进食几乎看不见）。"""
+        best = None
+        bd = 1 << 30
+        for ch in col.food_rooms:
+            if ch.get("store", 0) < 1 or not ch.get("linked"):
+                continue
+            if self._in_ellipse(x, y, ch):
+                return ch
+            d = abs(x - ch["cx"]) + abs(y - ch["cy"])
+            if d < bd:
+                bd, best = d, ch
         return best
 
     # 阶段13 路线规划：在挖好的通路里给非挖掘蚁 BFS 一条整线，逐格沿走。
@@ -1021,9 +1037,18 @@ class World:
         else:
             a.fatigue = min(FATIGUE_MAX, a.fatigue + FATIGUE_RATE * a.pace)  # 干活→累（*pace：累快慢各异）
         a.energy -= 0.03 * a.size  # *size：体型各异→能耗不同→大蚁更勤觅食（均值 1.0 不变，不扰经济）
-        if a.energy < 50 and not a.resting and col.store >= 1 and (a.age + a.eat_offset) % 30 == 0:
-            self._take_food(col, 1)  # 领食：1 食物换 40 能量（慢代谢：更耐饿、寿命更长）
-            a.energy = min(150.0, a.energy + 40)
+        # 阶段14：饥饿节律——干活/休息都按各自 pace 累积饥饿，到阈值回粮室吃饭（见下方 eating 块）。
+        a.hunger += HUNGER_RATE * a.pace
+        # 回退领食：尚无粮室时（开局/粮室未挖）就地取过渡粮（start_store），否则开局全饿死。
+        if (
+            a.hunger >= HUNGER_MAX
+            and not a.eating
+            and col.food_target is None
+            and col.store >= 1
+        ):
+            self._take_food(col, EAT_FOOD)
+            a.energy = min(150.0, a.energy + EAT_ENERGY)
+            a.hunger = 0.0
         if a.energy <= 0:
             dead.add(id(a))  # 饿死
             return
@@ -1041,6 +1066,30 @@ class World:
                     break
         if a.resting:
             return  # 原地休息（不移动/不觅食/不挖，仅防御）——睡室内额外回血，原地歇也有疲劳恢复
+        # 阶段14 可见进食：进食中→原地停留、逐 tick 回能量；饿了且已走到粮室→就地开饭。
+        # （饿蚁的 BFS 目标已指向粮室，见下方 tp 分支——先走过去，到这儿才开吃；吃满 EAT_TIME 收工。）
+        if a.eating:
+            a.energy = min(150.0, a.energy + EAT_ENERGY / EAT_TIME)
+            a.eat_t -= 1
+            if a.eat_t <= 0:
+                a.eating = False
+            return  # 进食中：不移动/不觅食（可见停留）
+        er = (
+            self._eat_room(col, a.x, a.y)
+            if (a.hunger >= HUNGER_MAX and a.state == SEEK and not a.maintaining
+                and a.egg is None and a.y >= SURFACE)  # 巢内（地下）才吃粮室
+            else None
+        )
+        if (
+            er is not None
+            and self._in_ellipse(a.x, a.y, er)  # 已走到（最近/所在的）粮室内
+            and occ.get((a.x, a.y), 0) < EAT_CROWD_MAX  # 本格已挤→不在此开吃，先走开（防进食堆叠）
+        ):
+            self._take_food(col, EAT_FOOD)  # 吃 1 份粮
+            a.eating = True
+            a.eat_t = EAT_TIME
+            a.hunger = 0.0  # 吃完重置饥饿节律
+            return  # 本 tick 起开吃（不移动）
         food = self.food
         sig = self.food_p if (a.state == SEEK and not a.maintaining and not a.resting and a.egg is None) else None
         target = self.nearest_food(a.x) if (a.state == SEEK and a.y < SURFACE and not a.building and not a.maintaining and not a.resting and a.egg is None) else None
@@ -1183,7 +1232,11 @@ class World:
             else:
                 tp = (ft["cx"], ft["cy"]) if ft is not None else (col.qx, col.qy)
         elif a.state == SEEK and not a.maintaining and not a.resting and a.egg is None:
-            if a.y < SURFACE and target is not None:
+            er = self._eat_room(col, a.x, a.y) if a.hunger >= HUNGER_MAX else None
+            if er is not None:
+                # 阶段14：饿了→去（就近的）粮室吃饭（地上先入巢，地下直奔粮室）；到粮室后由上方 eating 块开吃
+                tp = (col.qx, SURFACE) if a.y < SURFACE else (er["cx"], er["cy"])
+            elif a.y < SURFACE and target is not None:
                 tp = (target[0], target[1])
             else:
                 tp = (col.qx, SURFACE - 1)  # 地下觅食蚁：汇主竖井→上地表入口格
@@ -1403,11 +1456,18 @@ class World:
                     and a.path_i + 1 < len(p)
                     and self._path_cell_ok(p[a.path_i + 1][0], p[a.path_i + 1][1], col)
                 )
-                if not ok:
+                if not ok and a.path_target == tp and a.path_fail > 0:
+                    # 已知该目标不可达（如新建房中心格尚未挖通）：冷却期内不重算 BFS，
+                    # 退回打分兜底自由行走——否则每 tick 白算一次 BFS → 性能风暴
+                    # （2026-10-14 定位：空 food_target 房中心 + 未挖通睡室中心，pop 越大越糟）
+                    a.path_fail -= 1
+                elif not ok:
                     p = self.find_path(a.x, a.y, tp[0], tp[1], col)
                     a.path = p
                     a.path_i = 0
                     a.path_target = tp
+                    # 不可达→记冷却，PATH_RETRY tick 后才重试（目标挖通后自愈）
+                    a.path_fail = 0 if p is not None else PATH_RETRY
                     ok = p is not None and a.path_i + 1 < len(p)
                 if ok:
                     nxp, nyp = p[a.path_i + 1]
@@ -1471,7 +1531,7 @@ class World:
             a.egg = None
 
     def frame(self) -> dict:
-        ants = [[a.uid, a.x, a.y, a.colony, a.state, a.role, a.d, a.maintaining, a.resting, a.size] for c in self.colonies for a in c.ants]
+        ants = [[a.uid, a.x, a.y, a.colony, a.state, a.role, a.d, a.maintaining, a.resting, a.size, 1 if a.eating else 0] for c in self.colonies for a in c.ants]
         # 阶段7.4：三阶段幼体，带阶段标记（0=卵 1=幼虫 2=蛹）供前端分色渲染
         larvae = (
             [[e["x"], e["y"], 0] for c in self.colonies for e in c.eggs]

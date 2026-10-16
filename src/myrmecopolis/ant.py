@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import random
 
-from .constants import SEEK, SOLDIER, INDIV_VARIATION
+from .constants import SEEK, SOLDIER, INDIV_VARIATION, HUNGER_MAX
 
 class Ant:
     _next_uid = 0
     __slots__ = (
         "x", "y", "d", "state", "hp", "energy", "role", "colony", "food",
         "building", "breaking", "maintaining", "resting", "fatigue", "age", "max_age", "eat_offset", "uid",
-        "egg", "pace", "size", "carry", "sleep_room", "path", "path_i", "path_target",
+        "egg", "pace", "size", "carry", "sleep_room", "path", "path_i", "path_target", "path_fail",
+        "eating", "eat_t", "hunger",
     )
 
     def __init__(self, x: int, y: int, role: int, colony: int, rng: random.Random) -> None:
@@ -50,6 +51,12 @@ class Ant:
         self.path = None
         self.path_i = 0
         self.path_target = None
+        self.path_fail = 0  # 目标不可达时的重试冷却（防每 tick 重算 BFS 风暴）
+        # 阶段14：可见进食——按饥饿节律回粮室停留进食（eating=正在吃, eat_t=剩余停留 tick）
+        # hunger 用已知的 eat_offset 派生初值（错开进食节奏），不新增 RNG。
+        self.eating = False
+        self.eat_t = 0
+        self.hunger = self.eat_offset * (HUNGER_MAX / 20.0)
         self.uid = Ant._next_uid
         Ant._next_uid += 1
 
