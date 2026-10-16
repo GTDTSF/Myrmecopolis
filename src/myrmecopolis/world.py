@@ -1540,32 +1540,15 @@ class World:
         )
         q = [v for c in self.colonies for v in (c.qx, c.qy, 1 if c.queen_resting else 0)]
         s = [v for c in self.colonies for v in (c.population, int(c.store), len(c.eggs) + len(c.larvae) + len(c.pupae), int(c.food_gained))]
+        # 阶段15 粮仓可视化：每间粮室直接发"房中心/半径/存粮"，前端画成堆满的谷堆
+        # （旧版发房壁边缘 16 格、每格一个 4×2 像素小黄块——太小、没有"粮仓堆满"的感觉）
         fc = []
         for c in self.colonies:
-            for ch in c.food_rooms:  # 阶段10：多间储粮室，各按自己存粮渲染（食物分散可见）
+            for ch in c.food_rooms:
                 amt = int(ch["store"])
                 if amt < 2:
                     continue
-                rx, ry = ch["rx"], ch["ry"]
-
-                def in_room(x, y):
-                    return (x - ch["cx"]) ** 2 / (rx * rx) + (y - ch["cy"]) ** 2 / (ry * ry) <= 1
-
-                # 食物散在房壁边缘：取内周圈格子，按稳定哈希排序（每帧不闪）
-                key = (ch["cx"] * 73856093) ^ (ch["cy"] * 19349663)
-                edge = [
-                    (x, y)
-                    for y in range(ch["cy"] - ry, ch["cy"] + ry + 1)
-                    for x in range(ch["cx"] - rx, ch["cx"] + rx + 1)
-                    if in_room(x, y)
-                    and self.terrain[y * W + x] == TUNNEL
-                    and not (in_room(x - 1, y) and in_room(x + 1, y) and in_room(x, y - 1) and in_room(x, y + 1))
-                ]
-                edge.sort(key=lambda p: (p[0] * 73856093) ^ (p[1] * 19349663) ^ key)
-                cells = edge[:16]
-                if cells:
-                    for x, y in cells:
-                        fc.append([x, y, max(1, amt // len(cells))])
+                fc.append([ch["cx"], ch["cy"], ch["rx"], ch["ry"], amt])
         e = [
             [
                 en["x"]

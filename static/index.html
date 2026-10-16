@@ -45,11 +45,30 @@ function drawGrid(fb){
 }
 
 function drawPantry(fc){
-  for(const [x,y,amt] of fc){
-    if(amt<1)continue;
-    const k=Math.min(1,amt/60);
-    ctx.fillStyle=`rgb(${120+30*k|0},${150+40*k|0},60)`;
-    ctx.fillRect(x*S+2,y*S+3,4,2+2*k|0);
+  // 阶段15：每间粮室画一堆"堆满的谷堆"（金黄径向渐变 + 堆尖高光 + 谷粒点）。
+  // fc 项 = [房中心cx,cy, 半径rx,ry, 存粮amt]，越满谷堆铺得越满、越亮。
+  for(const [cx,cy,rx,ry,amt] of fc){
+    if(amt<2)continue;
+    const px=(cx+0.5)*S, py=(cy+0.5)*S, ex=rx*S, ey=ry*S;
+    const k=Math.min(1,amt/1000);      // 满仓度（粮室通常存 1000-2000）
+    const s=0.72+0.28*k;               // 谷堆占房间的比例（满仓几乎铺满整间）
+    ctx.save();
+    const g=ctx.createRadialGradient(px,py-ey*0.3,ey*0.12,px,py,Math.max(ex,ey)*s*1.12);
+    g.addColorStop(0,"rgb(255,228,132)");
+    g.addColorStop(0.5,`rgb(${212+30*k|0},${168+42*k|0},60)`);
+    g.addColorStop(1,`rgb(${118+30*k|0},${88+26*k|0},28)`);
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.ellipse(px,py,ex*s,ey*s,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=`rgba(255,240,175,${0.3+0.5*k})`;   // 堆尖高光
+    ctx.beginPath();ctx.ellipse(px,py-ey*0.3,ex*0.42*(0.5+0.5*k),ey*0.28*(0.5+0.5*k),0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="rgba(110,74,20,0.45)";             // 谷粒点（稳定散布，数量随存粮）
+    const n=Math.min(28,6+(amt/80|0));
+    for(let i=0;i<n;i++){
+      const a=i*2.399963+(cx*1.7+cy*2.3), rr=Math.sqrt(((i*7)%13)/13);
+      ctx.beginPath();
+      ctx.arc(px+Math.cos(a)*rr*ex*s*0.82,py+Math.sin(a)*rr*ey*s*0.82,1.5,0,Math.PI*2);ctx.fill();
+    }
+    ctx.restore();
   }
 }
 
