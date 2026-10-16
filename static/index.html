@@ -71,6 +71,68 @@ function drawPantry(fc){
   }
 }
 
+function drawRestaurant(pr, pt){
+  // 阶段16：蚂蚁饭店——暖色地板 + 圆餐桌（每桌一盘小食）+ 挂灯 + 招牌；
+  // 有余粮时（pt>0）开派对：暖光脉动 + 三角彩旗 + 撒花 + 飘升音符。
+  // 位置全由房中心/半径与索引派生（无随机、跨帧稳定），动画用 performance.now()。
+  if(!pr||pr.length<4)return;
+  const [cx,cy,rx,ry]=pr, ex=rx*S, ey=ry*S, t=performance.now()/1000;
+  ctx.save();ctx.translate((cx+0.5)*S,(cy+0.5)*S);
+  const fg=ctx.createRadialGradient(0,-ey*0.25,ey*0.15,0,0,ex); // 暖木地板
+  fg.addColorStop(0,"#7c5731");fg.addColorStop(1,"#523a1f");
+  ctx.beginPath();ctx.ellipse(0,0,ex*0.95,ey*0.95,0,0,Math.PI*2);ctx.fillStyle=fg;ctx.fill();
+  ctx.lineWidth=2;ctx.strokeStyle="rgba(38,24,11,0.65)";ctx.stroke();
+  const tn=Math.max(2,Math.min(4,Math.round(rx/3))); // 圆餐桌
+  for(let i=0;i<tn;i++){
+    const tx=(-0.55+1.1*(tn===1?0.5:i/(tn-1)))*ex*0.8, ty=Math.sin(i*1.9)*ey*0.22;
+    const tr=Math.min(ex,ey)*0.24;
+    ctx.fillStyle="#8a5a2b";ctx.beginPath();ctx.ellipse(tx,ty+tr*0.35,tr*0.55,tr*0.3,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#a5713a";ctx.beginPath();ctx.ellipse(tx,ty,tr,tr*0.72,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#f2e6c0";ctx.beginPath();ctx.ellipse(tx,ty-tr*0.12,tr*0.42,tr*0.3,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#e0a13c";ctx.beginPath();ctx.arc(tx,ty-tr*0.12,tr*0.15,0,Math.PI*2);ctx.fill();
+  }
+  ctx.strokeStyle="rgba(60,40,20,0.5)";ctx.lineWidth=1; // 挂灯串
+  ctx.beginPath();ctx.moveTo(-ex*0.75,-ey*0.68);ctx.quadraticCurveTo(0,-ey*0.9,ex*0.75,-ey*0.68);ctx.stroke();
+  const cols=["#ff6b6b","#ffd93d","#6bcB77","#4d96ff","#ff8ad8"];
+  for(let i=0;i<=6;i++){
+    const u=i/6;
+    ctx.fillStyle=cols[i%cols.length];ctx.globalAlpha=pt>0?1:0.7;
+    ctx.beginPath();ctx.arc(-ex*0.75+u*ex*1.5,-ey*0.68-0.22*ey*(4*u*(1-u))+3,2.6,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle="rgba(255,236,180,0.9)";ctx.font="bold 12px monospace";ctx.textAlign="center";
+  ctx.fillText("饭店",0,-ey-6);
+  if(pt>0){
+    const g=ctx.createRadialGradient(0,0,ey*0.1,0,0,ex*1.25); // 暖光脉动
+    g.addColorStop(0,`rgba(255,214,120,${(0.3+0.18*Math.sin(t*6)).toFixed(3)})`);
+    g.addColorStop(1,"rgba(255,214,120,0)");
+    ctx.fillStyle=g;ctx.beginPath();ctx.ellipse(0,0,ex*1.3,ey*1.3,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#ff5a7a";ctx.globalAlpha=0.9;ctx.beginPath(); // 三角彩旗
+    for(let i=0;i<=8;i++){
+      const u=i/8, xb=-ex*0.85+u*ex*1.7, yb=-ey*0.5-0.3*ey*(4*u*(1-u));
+      ctx.moveTo(xb-4,yb);ctx.lineTo(xb+4,yb);ctx.lineTo(xb,yb+7);ctx.closePath();
+    }
+    ctx.fill();ctx.globalAlpha=1;
+    const cc=["#ff5a5a","#ffd23f","#5ce08a","#5aa9ff","#ff8ad8","#f2f2f2"]; // 撒花
+    for(let i=0;i<30;i++){
+      const q=(h=>h-Math.floor(h))(Math.sin(i*127.1+cx*7.3+cy*3.1)*43758.5453);
+      const x0=(q-0.5)*ex*1.6, yy=((q*2)*ey*1.1+t*(26+q*70))%(ey*2.2)-ey*1.1;
+      if((x0*x0)/(ex*ex)+(yy*yy)/(ey*ey)>1.05)continue;
+      ctx.save();ctx.translate(x0,yy);ctx.rotate(t*4+q*7);
+      ctx.fillStyle=cc[(q*97|0)%cc.length];ctx.fillRect(-2.2,-1.2,4.4,2.4);
+      ctx.restore();
+    }
+    const notes=["♪","♫","♩"]; // 飘升音符
+    ctx.fillStyle="rgba(255,244,190,0.95)";ctx.font="bold 13px monospace";ctx.textAlign="center";
+    for(let i=0;i<3;i++){
+      const ph=(t*0.8+i*0.37)%1;
+      ctx.globalAlpha=1-ph;ctx.fillText(notes[i],(i-1)*ex*0.4,-ey*0.15-ph*ey*0.95);
+    }
+    ctx.globalAlpha=1;
+  }
+  ctx.restore();
+}
+
 function drawMounds(e){
   for(const xs of e){
     for(const x of xs){
@@ -94,7 +156,7 @@ function drawActors(a,l,q){
     }
   }
   const seen=new Set();
-  for(const [uid,x,y,c,st,caste,dir,maint,rest,sz,eat] of a){
+  for(const [uid,x,y,c,st,caste,dir,maint,rest,sz,eat,pty] of a){
     seen.add(uid);
     const tgt=AANG[dir];
     let cur=angState.get(uid);
@@ -104,7 +166,8 @@ function drawActors(a,l,q){
     while(d<-Math.PI)d+=2*Math.PI;
     cur+=d*0.15; // 指数趋近放慢（约 0.4s）：方向逐 tick 微调时朝向平滑过渡、不逐帧追抖（用户"反复抽搐"）
     angState.set(uid,cur);
-    drawAnt(ctx,(x+0.5)*S,(y+0.5)*S,caste===1?"soldier":"worker",c,st===1,cur,sz);
+    const bob=pty?Math.sin(performance.now()/150+uid*0.7)*2.2:0; // 阶段16：派对蚁蹦跳
+    drawAnt(ctx,(x+0.5)*S,(y+0.5)*S+bob,caste===1?"soldier":"worker",c,st===1,cur,sz);
     if(rest){ // 休息蚁：zzz 睡眠特效（干累了回蚁巢歇脚）
       const ph=performance.now()/550 + uid*0.7;
       ctx.save();
@@ -140,6 +203,20 @@ function drawActors(a,l,q){
       ctx.beginPath();
       ctx.arc(0,0,13,0,Math.PI*2);
       ctx.stroke();
+      ctx.restore();
+    }
+    if(pty){ // 阶段16：派对蚁——头顶彩点（撒花/欢呼）
+      const ph=performance.now()/220+uid*1.3;
+      const pcols=["#ff5a5a","#ffd23f","#5ce08a","#5aa9ff","#ff8ad8"];
+      ctx.save();
+      ctx.translate((x+0.5)*S,(y+0.5)*S);
+      for(let i=0;i<3;i++){
+        const a2=ph+i*2.1;
+        ctx.globalAlpha=0.5+0.5*Math.sin(a2);
+        ctx.fillStyle=pcols[(uid+i)%pcols.length];
+        ctx.beginPath();ctx.arc(Math.cos(a2)*(6+i), -9-i*2+Math.sin(a2)*2, 2, 0, Math.PI*2);ctx.fill();
+      }
+      ctx.globalAlpha=1;
       ctx.restore();
     }
   }
@@ -198,6 +275,7 @@ new EventSource("/stream").onmessage=(e)=>{
   if(terrain)drawGrid(fb);
   drawMounds(d.e||[[],[]]);
   drawPantry(d.fc||[]);
+  drawRestaurant(d.pr||[], d.pt||0);
   drawActors(d.a,d.l,d.q);
   drawSleepRoom(d.sr);
   drawDaylight(d.day||0);

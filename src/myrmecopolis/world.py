@@ -8,7 +8,7 @@ from collections import deque
 
 from .ant import Ant
 from .colony import Colony
-from .constants import W, H, SURFACE, ROCK, DIRT, TUNNEL, DIRS, SEEK, CARRY, WORKER, SOLDIER, MAX_POP, FOOD_CAP, FOOD_DROP_P, FOOD_DROP_MIN, FOOD_DROP_MAX, FOOD_SCAN_EVERY, FOOD_BAND, WALK_P, DIG_P, NEST_TARGET, NEST_RADIUS, CHAMBER_BIAS, SHAFT_BIAS, NEST_GROW_EVERY, MAX_CHAMBERS, PATH_BIAS, RECLAIM_K, RECLAIM_P, MAINTAIN_EVERY, MAINTAINER_MAX, ROOM_DECAY_P, CROWD_P, FOOD_PER_CELL, FATIGUE_RATE, FATIGUE_MAX, REST_RECOVER, REST_MIN_FAT, REST_REGEN, REST_CROWD_MAX, DAY, QUEEN_NAP, QUEEN_WAKE, EGG_TIME, LARVA_TIME, PUPA_TIME, BRIDGE_BIAS, EXPLORER_MOD, WEB_CAP, WEB_RADIUS, ORPHAN_SWEEP_EVERY, HUNGER_RATE, HUNGER_MAX, EAT_TIME, EAT_ENERGY, EAT_FOOD, EAT_CROWD_MAX, PATH_RETRY
+from .constants import W, H, SURFACE, ROCK, DIRT, TUNNEL, DIRS, SEEK, CARRY, WORKER, SOLDIER, MAX_POP, FOOD_CAP, FOOD_DROP_P, FOOD_DROP_MIN, FOOD_DROP_MAX, FOOD_SCAN_EVERY, FOOD_BAND, WALK_P, DIG_P, NEST_TARGET, NEST_RADIUS, CHAMBER_BIAS, SHAFT_BIAS, NEST_GROW_EVERY, MAX_CHAMBERS, PATH_BIAS, RECLAIM_K, RECLAIM_P, MAINTAIN_EVERY, MAINTAINER_MAX, ROOM_DECAY_P, CROWD_P, FOOD_PER_CELL, FATIGUE_RATE, FATIGUE_MAX, REST_RECOVER, REST_MIN_FAT, REST_REGEN, REST_CROWD_MAX, DAY, QUEEN_NAP, QUEEN_WAKE, EGG_TIME, LARVA_TIME, PUPA_TIME, BRIDGE_BIAS, EXPLORER_MOD, WEB_CAP, WEB_RADIUS, ORPHAN_SWEEP_EVERY, HUNGER_RATE, HUNGER_MAX, EAT_TIME, EAT_ENERGY, EAT_FOOD, EAT_CROWD_MAX, PATH_RETRY, PARTY_RICH, PARTY_COOL, PARTY_TIME, PARTY_EAT, PARTY_COOLDOWN, PARTY_ANTS
 
 def _b64(b: bytearray) -> str:
     return base64.b64encode(bytes(b)).decode()
@@ -352,6 +352,8 @@ class World:
             return "food"
         if sleeps < 3:
             return "sleep"
+        if "party" not in kinds:
+            return "party"  # 阶段16：留一间饭店（有余粮时在此开派对耗粮，见 self._colonies 派对逻辑）
         return "food" if foods <= sleeps else "sleep"
 
     def _dynamic_chamber_def(self, col: Colony, n: int):
@@ -754,6 +756,40 @@ class World:
                         col.food_target = _best
             else:
                 col.food_target = None
+            # 阶段16 蚂蚁饭店：有余粮就定期开派对、消耗存粮（BFS 高效觅食→存粮爆仓的出口）
+            col.party_room = next((ch for ch in col.chambers if ch.get("kind") == "party"), None)
+            _cap = sum(self.room_capacity(col, ch) * FOOD_PER_CELL for ch in col.food_rooms)
+            _fill = col.store / max(1.0, _cap)
+            if col.party_t > 0:
+                self._take_food(col, PARTY_EAT)  # 派对吃粮（唯一耗粮入口，帐目落在粮室上）
+                col.party_t -= 1
+                if _fill <= PARTY_COOL:          # 吃到冷却线→尽兴散场
+                    col.party_t = 0
+                    col.party_cd = PARTY_COOLDOWN
+            else:
+                if col.party_cd > 0:
+                    col.party_cd -= 1
+                elif (
+                    col.party_room is not None
+                    and col.party_room.get("linked")
+                    and self.room_capacity(col, col.party_room) >= 20  # 饭店挖出可用面积才开
+                    and _fill >= PARTY_RICH
+                ):
+                    col.party_t = PARTY_TIME
+                    n_inv = 0
+                    for a in col.ants:  # 邀请一批闲蚁到场（不新增 RNG：按列表顺序取）
+                        if n_inv >= PARTY_ANTS:
+                            break
+                        if (
+                            a.state == SEEK and a.egg is None and not a.building
+                            and not a.breaking and not a.maintaining and not a.resting
+                            and not a.food
+                        ):
+                            a.party = True
+                            n_inv += 1
+            if col.party_t <= 0:
+                for a in col.ants:
+                    a.party = False  # 散场：清派对标记（下 tick 恢复常规职责）
         if self.tick_count % MAINTAIN_EVERY == 0:  # 重扫塌陷 → 维护蚁修复目标
             # 维护蚁的窄逻辑：只修"塌了的房格"（已挖房格变土），不碰走廊/竖井，更不挖随机土——
             # 否则维护蚁变成全巢挖掘工，蚁穴越修越大
@@ -1090,6 +1126,9 @@ class World:
             a.eat_t = EAT_TIME
             a.hunger = 0.0  # 吃完重置饥饿节律
             return  # 本 tick 起开吃（不移动）
+        # 阶段16：派对蚁已到饭店→就地跳舞（不移动；前端据 party 标志画蹦跳 + 撒花/音符）
+        if a.party and col.party_t > 0 and col.party_room is not None and self._in_ellipse(a.x, a.y, col.party_room):
+            return
         food = self.food
         sig = self.food_p if (a.state == SEEK and not a.maintaining and not a.resting and a.egg is None) else None
         target = self.nearest_food(a.x) if (a.state == SEEK and a.y < SURFACE and not a.building and not a.maintaining and not a.resting and a.egg is None) else None
@@ -1122,6 +1161,7 @@ class World:
                 and not a.resting
                 and a.state == SEEK
                 and a.food == 0
+                and not a.party  # 阶段16：派对蚁不转去建造（要去饭店跳舞）
                 and a.y >= SURFACE
                 # 2026-10-09 软化 builder 门（同产卵门）：用"可用粮"(仓库+在途)而非仅 store。
                 # 旧版 store>=15 在 JIT 经济下死锁：存粮贴 0→无 builder→突破蚁绝迹→
@@ -1160,6 +1200,7 @@ class World:
                 and col.n_maintainers < maint_cap
                 and a.state == SEEK
                 and a.food == 0
+                and not a.party  # 阶段16：派对蚁不去维护
             ):
                 a.maintaining = True
                 col.n_maintainers += 1
@@ -1232,14 +1273,18 @@ class World:
             else:
                 tp = (ft["cx"], ft["cy"]) if ft is not None else (col.qx, col.qy)
         elif a.state == SEEK and not a.maintaining and not a.resting and a.egg is None:
-            er = self._eat_room(col, a.x, a.y) if a.hunger >= HUNGER_MAX else None
-            if er is not None:
-                # 阶段14：饿了→去（就近的）粮室吃饭（地上先入巢，地下直奔粮室）；到粮室后由上方 eating 块开吃
-                tp = (col.qx, SURFACE) if a.y < SURFACE else (er["cx"], er["cy"])
-            elif a.y < SURFACE and target is not None:
-                tp = (target[0], target[1])
+            if a.party and col.party_t > 0 and col.party_room is not None:
+                # 阶段16：派对蚁直奔饭店（地上先入巢、地下直奔饭店；到饭店后由上方跳舞块站住）
+                tp = (col.qx, SURFACE) if a.y < SURFACE else (col.party_room["cx"], col.party_room["cy"])
             else:
-                tp = (col.qx, SURFACE - 1)  # 地下觅食蚁：汇主竖井→上地表入口格
+                er = self._eat_room(col, a.x, a.y) if a.hunger >= HUNGER_MAX else None
+                if er is not None:
+                    # 阶段14：饿了→去（就近的）粮室吃饭（地上先入巢，地下直奔粮室）；到粮室后由上方 eating 块开吃
+                    tp = (col.qx, SURFACE) if a.y < SURFACE else (er["cx"], er["cy"])
+                elif a.y < SURFACE and target is not None:
+                    tp = (target[0], target[1])
+                else:
+                    tp = (col.qx, SURFACE - 1)  # 地下觅食蚁：汇主竖井→上地表入口格
         for dd in cands:
             d = dd % 8
             nx = a.x + DIRS[d][0]
@@ -1531,7 +1576,7 @@ class World:
             a.egg = None
 
     def frame(self) -> dict:
-        ants = [[a.uid, a.x, a.y, a.colony, a.state, a.role, a.d, a.maintaining, a.resting, a.size, 1 if a.eating else 0] for c in self.colonies for a in c.ants]
+        ants = [[a.uid, a.x, a.y, a.colony, a.state, a.role, a.d, a.maintaining, a.resting, a.size, 1 if a.eating else 0, 1 if a.party else 0] for c in self.colonies for a in c.ants]
         # 阶段7.4：三阶段幼体，带阶段标记（0=卵 1=幼虫 2=蛹）供前端分色渲染
         larvae = (
             [[e["x"], e["y"], 0] for c in self.colonies for e in c.eggs]
@@ -1572,6 +1617,13 @@ class World:
             ]
             if self.colonies and self.colonies[0].sleep_rooms
             else [],
+            # 阶段16：饭店房间 [cx,cy,rx,ry]（无则 []）+ 派对进度 0-1（>0 表示正在开派对）
+            "pr": (
+                [c0.party_room["cx"], c0.party_room["cy"], c0.party_room["rx"], c0.party_room["ry"]]
+                if (c0 := self.colonies[0] if self.colonies else None) is not None and c0.party_room is not None
+                else []
+            ),
+            "pt": round(c0.party_t / PARTY_TIME, 3) if c0 is not None and c0.party_t > 0 else 0,
         }
 
     def terrain_str(self) -> str:

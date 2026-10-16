@@ -11,6 +11,7 @@ class Ant:
         "building", "breaking", "maintaining", "resting", "fatigue", "age", "max_age", "eat_offset", "uid",
         "egg", "pace", "size", "carry", "sleep_room", "path", "path_i", "path_target", "path_fail",
         "eating", "eat_t", "hunger",
+        "party",
     )
 
     def __init__(self, x: int, y: int, role: int, colony: int, rng: random.Random) -> None:
@@ -57,6 +58,7 @@ class Ant:
         self.eating = False
         self.eat_t = 0
         self.hunger = self.eat_offset * (HUNGER_MAX / 20.0)
+        self.party = False  # 阶段16：正在参加饭店派对（去饭店跳舞；散场由 Colony 块统一清）
         self.uid = Ant._next_uid
         Ant._next_uid += 1
 
