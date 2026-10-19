@@ -8,7 +8,7 @@ from collections import deque
 
 from .ant import Ant
 from .colony import Colony
-from .constants import W, H, SURFACE, ROCK, DIRT, TUNNEL, DIRS, SEEK, CARRY, WORKER, SOLDIER, MAX_POP, FOOD_CAP, FOOD_DROP_P, FOOD_DROP_MIN, FOOD_DROP_MAX, FOOD_SCAN_EVERY, FOOD_BAND, WALK_P, DIG_P, NEST_TARGET, NEST_RADIUS, CHAMBER_BIAS, SHAFT_BIAS, NEST_GROW_EVERY, MAX_CHAMBERS, PATH_BIAS, RECLAIM_K, RECLAIM_P, MAINTAIN_EVERY, MAINTAINER_MAX, ROOM_DECAY_P, CROWD_P, FOOD_PER_CELL, FATIGUE_RATE, FATIGUE_MAX, REST_RECOVER, REST_MIN_FAT, REST_REGEN, REST_CROWD_MAX, DAY, QUEEN_NAP, QUEEN_WAKE, EGG_TIME, LARVA_TIME, PUPA_TIME, BRIDGE_BIAS, EXPLORER_MOD, WEB_CAP, WEB_RADIUS, ORPHAN_SWEEP_EVERY, HUNGER_RATE, HUNGER_MAX, EAT_TIME, EAT_ENERGY, EAT_FOOD, EAT_CROWD_MAX, PATH_RETRY, PARTY_RICH, PARTY_COOL, PARTY_TIME, PARTY_EAT, PARTY_COOLDOWN, PARTY_ANTS
+from .constants import W, H, SURFACE, ROCK, DIRT, TUNNEL, DIRS, SEEK, CARRY, WORKER, SOLDIER, MAX_POP, FOOD_CAP, FOOD_DROP_P, FOOD_DROP_MIN, FOOD_DROP_MAX, FOOD_SCAN_EVERY, FOOD_BAND, FALL_SPEED, WALK_P, DIG_P, NEST_TARGET, NEST_RADIUS, CHAMBER_BIAS, SHAFT_BIAS, NEST_GROW_EVERY, MAX_CHAMBERS, PATH_BIAS, RECLAIM_K, RECLAIM_P, MAINTAIN_EVERY, MAINTAINER_MAX, ROOM_DECAY_P, CROWD_P, FOOD_PER_CELL, FATIGUE_RATE, FATIGUE_MAX, REST_RECOVER, REST_MIN_FAT, REST_REGEN, REST_CROWD_MAX, DAY, QUEEN_NAP, QUEEN_WAKE, EGG_TIME, LARVA_TIME, PUPA_TIME, BRIDGE_BIAS, EXPLORER_MOD, WEB_CAP, WEB_RADIUS, ORPHAN_SWEEP_EVERY, HUNGER_RATE, HUNGER_MAX, EAT_TIME, EAT_ENERGY, EAT_FOOD, EAT_CROWD_MAX, PATH_RETRY, PARTY_RICH, PARTY_COOL, PARTY_TIME, PARTY_EAT_ANT, PARTY_COOLDOWN, PARTY_ANTS
 
 def _b64(b: bytearray) -> str:
     return base64.b64encode(bytes(b)).decode()
@@ -26,6 +26,7 @@ class World:
         self.nest_mark = bytearray(n)  # 蚁穴格标记：巢室/走廊/入口竖井，受维护保护免回填
         self.regrow: list[tuple[int, float]] = []
         self.targets: list[tuple[int, int]] = []
+        self.falling: list[list] = []  # 阶段17：空中下落中的食物 [x, y(格,浮点), 数量]——落地才计入地表 food
         self.terrain_version = 0
         self.tick_count = 0
         # 格子溯源（纯记账，不影响行为/RNG）：dig_t=该格最后一次被挖开的 tick（0=未挖开过），
@@ -577,13 +578,23 @@ class World:
             if decay_use and use[i]:
                 use[i] -= 1
         food = self.food
-        # 地面随机掉落：偏落到群落(居中)觅食带内（阶段 8 单群落，缩短觅食往返）
+        # 地面食物投放（阶段17）：不再凭空出现在地面，而是从空中可见地落下——落地才成为地表粮。
         if rng.random() < FOOD_DROP_P:
             cx = W // 2
             x0 = max(6, min(W - 12, cx + rng.randrange(-FOOD_BAND, FOOD_BAND + 1)))
             w = rng.randrange(2, 4)
             for x in range(x0, min(W - 2, x0 + w)):
-                food[W + x] = min(FOOD_CAP, food[W + x] + rng.randrange(FOOD_DROP_MIN, FOOD_DROP_MAX))
+                self.falling.append([x, 0.0, rng.randrange(FOOD_DROP_MIN, FOOD_DROP_MAX)])
+        if self.falling:  # 推进下落：够到地面才计入 food（paste 位置由 y 决定，落地前不算存粮）
+            still = []
+            for it in self.falling:
+                it[1] += FALL_SPEED
+                if it[1] >= 1.0:
+                    x = it[0]
+                    food[W + x] = min(FOOD_CAP, food[W + x] + it[2])
+                else:
+                    still.append(it)
+            self.falling = still
         if self.tick_count % FOOD_SCAN_EVERY == 0:
             self.targets = [(x, 1) for x in range(4, W - 4) if food[W + x] > 12]
         for col in self.colonies:
@@ -761,7 +772,9 @@ class World:
             _cap = sum(self.room_capacity(col, ch) * FOOD_PER_CELL for ch in col.food_rooms)
             _fill = col.store / max(1.0, _cap)
             if col.party_t > 0:
-                self._take_food(col, PARTY_EAT)  # 派对吃粮（唯一耗粮入口，帐目落在粮室上）
+                # 耗粮与到场派对蚁数成正比（"粮食消耗要和聚会中的蚂蚁数匹配"）——仍走唯一耗粮入口
+                col.party_n = sum(1 for a in col.ants if a.party)
+                self._take_food(col, PARTY_EAT_ANT * col.party_n)
                 col.party_t -= 1
                 if _fill <= PARTY_COOL:          # 吃到冷却线→尽兴散场
                     col.party_t = 0
@@ -788,6 +801,7 @@ class World:
                             a.party = True
                             n_inv += 1
             if col.party_t <= 0:
+                col.party_n = 0
                 for a in col.ants:
                     a.party = False  # 散场：清派对标记（下 tick 恢复常规职责）
         if self.tick_count % MAINTAIN_EVERY == 0:  # 重扫塌陷 → 维护蚁修复目标
@@ -1040,36 +1054,25 @@ class World:
         if a.age >= a.max_age:
             dead.add(id(a))  # 老死
             return
-        # 休息（写实碎片化打盹）：干累了(疲劳达标)→在巢内**原地**歇脚。
-        # 2026-10-10 修复"疲劳蚁大群无规律徘徊"：旧逻辑要求人**站在睡室内**才许歇，
-        # 但睡室在走廊迷宫里靠直线梯度导航不可靠→seed5@80k 实测 78% 蚁疲劳拉满、仅 3% 在歇，
-        # 其余带满疲劳空转（用户所见"大群徘徊"）。真实蚂蚁本就在巢内到处打盹，不必挤一间睡室。
-        # 改为：地下累了即原地歇（恢复疲劳）；睡室降级为**回血加成区**（at_home 时额外被动回血，
-        # 见下），仍值得去、但去不到也能歇→导航不再是休息的硬前提，彻底解除迷宫依赖。
+        # 休息（阶段17 重构：只在睡室睡，不在路上/别处睡）。
+        # 旧逻辑"地下累了即原地歇"是为绕开"睡室导航不可靠"的坑（旧直线梯度→seed5@80k 78% 蚁疲劳拉满、
+        # 仅 3% 在歇）；阶段13 上了 BFS 后走睡室已可靠，故改回写实版：累了(疲劳满)→先干完当前这趟
+        # （带粮/抱卵的先卸货，见下 tp 分支）→走到**自己认领的睡室**才开睡。去睡室的路上**不再累积疲劳**
+        # （"路上不再消耗精力"）——不再像旧版卡在半路疲劳拉满原地空转。饭店/枢纽无需特判：只认睡室就够。
         at_home = col.in_sleep_room(a.x, a.y)
-        # 2026-10-10 修复"竖井大群徘徊"：主厅+主竖井是全巢唯一交通枢纽（上下行/各走廊都过这里），
-        # 原地打盹若允许在此歇脚，累蚁会堆积在竖井口（实测 seed5@80k 23/32 休息蚁全堵在主厅顶 y=100）
-        # → 堵死唯一上下通道、蚁群排队。真实蚂蚁在安静的角落歇、不堵在繁忙的中心。
-        # 故枢纽区（主厅+竖井）禁止歇脚：累蚁在此继续走、出了枢纽再原地歇。
-        in_hub = abs(a.x - col.qx) <= 5 and SURFACE - 1 <= a.y <= col.qy + 6
-        if (
-            not a.resting
-            and a.egg is None
-            and not (a.state == CARRY and a.food)
-            and a.fatigue >= FATIGUE_MAX
-            and a.y >= SURFACE  # 在巢内（地下）即许原地歇脚
-            and not in_hub  # 枢纽区（主厅+竖井）不许歇脚，防堵唯一上下通道
-            and occ.get((a.x, a.y), 0) < REST_CROWD_MAX  # 本格已挤→不歇，走到安静格再歇（防同格堆叠）
-        ):
-            a.resting = True
-            if a.sleep_room >= 0:
-                a.sleep_room = -1  # 已就地歇脚，不再需要睡室（在途计数由下 tick 重算自动冲销）
+        if a.fatigue >= FATIGUE_MAX:
+            a.tired = True  # 累了→想睡（先把当前这趟干完，再回睡室）
         if a.resting:
             a.fatigue = max(0.0, a.fatigue - REST_RECOVER * a.pace)  # *pace：个体节律→恢复快慢各异→去同步
             if at_home:
                 a.energy = min(150.0, a.energy + REST_REGEN)  # 睡室内休息：额外被动回血
             if a.fatigue <= REST_MIN_FAT:
-                a.resting = False  # 歇够了→复工
+                a.resting = False
+                a.tired = False  # 歇够了→复工
+        elif a.tired:
+            if at_home:
+                a.resting = True  # 走到睡室→开睡（只在睡室睡）
+            # 去睡室途中：不累积疲劳（精力只补给、不再消耗）
         else:
             a.fatigue = min(FATIGUE_MAX, a.fatigue + FATIGUE_RATE * a.pace)  # 干活→累（*pace：累快慢各异）
         a.energy -= 0.03 * a.size  # *size：体型各异→能耗不同→大蚁更勤觅食（均值 1.0 不变，不扰经济）
@@ -1234,7 +1237,7 @@ class World:
         if (
             a.egg is None
             and not (a.state == CARRY and a.food)
-            and a.fatigue >= FATIGUE_MAX
+            and a.tired  # 累了→回睡室睡（先卸货：带粮/抱卵时不睡，见上方条件）
             and col.sleep_ready  # 睡室已挖出可用面积（未挖=土椭圆，拽过去=罢工）
             and a.y >= SURFACE
             and (abs(a.x - col.qx) + abs(a.y - col.qy)) <= 90  # 覆盖最外围动态睡室（房距 ≤76+房半径）
@@ -1624,6 +1627,8 @@ class World:
                 else []
             ),
             "pt": round(c0.party_t / PARTY_TIME, 3) if c0 is not None and c0.party_t > 0 else 0,
+            "pn": c0.party_n if c0 is not None else 0,  # 阶段16：派对蚁数（耗粮与之成正比）
+            "ff": [[it[0], round(it[1], 3), it[2]] for it in self.falling],  # 阶段17：空中下落中的食物 [x,y,量]
         }
 
     def terrain_str(self) -> str:

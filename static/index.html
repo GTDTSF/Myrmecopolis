@@ -44,6 +44,17 @@ function drawGrid(fb){
   ctx.drawImage(off,0,0,W*S,H*S);
 }
 
+function drawFalling(ff){
+  // 阶段17：地表食物"可见飘落"——空中下落的食物小块落到地面才成为地表绿斑，不再凭空刷新。
+  // ff 项 = [x, y(格,浮点), 数量]；动画位置直接取仿真里的 y，逐帧稳定。
+  for(const [x,yf,amt] of ff){
+    const px=(x+0.5)*S, py=(yf+0.5)*S, k=Math.min(1,amt/90);
+    ctx.fillStyle=`rgb(${(158+30*k)|0},${(196+26*k)|0},${(74+18*k)|0})`;
+    ctx.beginPath();ctx.arc(px,py,3.4+1.4*k,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle="rgba(70,96,26,0.65)";ctx.lineWidth=1;ctx.stroke();
+  }
+}
+
 function drawPantry(fc){
   // 阶段15b：每间粮室画成一堆"食物颗粒"（离散大圆点紧密堆积）——不是色块。
   // fc 项 = [房中心cx,cy, 半径rx,ry, 存粮amt]；越满颗粒堆得越满、越亮。
@@ -71,7 +82,7 @@ function drawPantry(fc){
   }
 }
 
-function drawRestaurant(pr, pt){
+function drawRestaurant(pr, pt, pn){
   // 阶段16：蚂蚁饭店——暖色地板 + 圆餐桌（每桌一盘小食）+ 挂灯 + 招牌；
   // 有余粮时（pt>0）开派对：暖光脉动 + 三角彩旗 + 撒花 + 飘升音符。
   // 位置全由房中心/半径与索引派生（无随机、跨帧稳定），动画用 performance.now()。
@@ -101,7 +112,7 @@ function drawRestaurant(pr, pt){
   }
   ctx.globalAlpha=1;
   ctx.fillStyle="rgba(255,236,180,0.9)";ctx.font="bold 12px monospace";ctx.textAlign="center";
-  ctx.fillText("饭店",0,-ey-6);
+  ctx.fillText(pt>0&&pn?"饭店 "+pn:"饭店",0,-ey-6); // 派对时报到场蚁数（耗粮与之成正比）
   if(pt>0){
     const g=ctx.createRadialGradient(0,0,ey*0.1,0,0,ex*1.25); // 暖光脉动
     g.addColorStop(0,`rgba(255,214,120,${(0.3+0.18*Math.sin(t*6)).toFixed(3)})`);
@@ -273,9 +284,10 @@ new EventSource("/stream").onmessage=(e)=>{
   frame++;
   const fb=b64(d.f);
   if(terrain)drawGrid(fb);
+  drawFalling(d.ff||[]);
   drawMounds(d.e||[[],[]]);
   drawPantry(d.fc||[]);
-  drawRestaurant(d.pr||[], d.pt||0);
+  drawRestaurant(d.pr||[], d.pt||0, d.pn||0);
   drawActors(d.a,d.l,d.q);
   drawSleepRoom(d.sr);
   drawDaylight(d.day||0);

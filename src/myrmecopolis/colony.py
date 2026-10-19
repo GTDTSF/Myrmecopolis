@@ -28,6 +28,7 @@ class Colony:
         self.party_room: dict | None = None  # 阶段16：饭店（kind=party，每 tick 重算；有余粮时在此开派对）
         self.party_t = 0    # 阶段16：当前派对剩余 tick（0=没在开派对）
         self.party_cd = 0   # 阶段16：距下一场派对的最短间隔倒计时
+        self.party_n = 0    # 阶段16：当前派对蚁数（耗粮按此值成正比；供前端显示）
         self.start_store = 0.0  # 开局储备粮（粮室接通前由它供粮，先消耗）
         self.food_gained = 0.0
         self.surface_open = False
