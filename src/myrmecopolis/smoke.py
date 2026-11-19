@@ -78,10 +78,13 @@ def smoke(ticks: int = 6000) -> None:
     far_dyn = max(
         ((ch["cx"] - c3.qx) ** 2 + (ch["cy"] - c3.qy) ** 2) ** 0.5 for ch in dyn
     ) if dyn else 0
-    unlinked = [i for i, ch in enumerate(c3.chambers) if not ch.get("linked")]
+    # 阶段23：无限扩张——末间房永远在施工，不能要"全连通"；改为"巢持续扩张 + 核心房已连通 + 向外扩张"
+    linked = sum(1 for ch in c3.chambers if ch.get("linked"))
+    in_progress = len(c3.chambers) - linked
     assert dyn, f"phase9: no dynamic rooms (rooms={len(c3.chambers)})"
-    assert not unlinked, f"phase9: unlinked room(s) {unlinked}"
-    assert far_dyn >= 22, f"phase9: nest not expanding outward (far_dyn={far_dyn:.0f})"
+    assert len(c3.chambers) >= 8, f"phase9: nest not expanding enough (rooms={len(c3.chambers)})"
+    assert linked >= 8, f"phase9: too few linked rooms ({linked}/{len(c3.chambers)})"
+    assert far_dyn >= 30, f"phase9: nest not expanding outward (far_dyn={far_dyn:.0f})"
     # 阶段10 多房间均分：储粮/睡室各多间 + 食物确实流入多间粮室
     n_food = sum(1 for ch in c3.chambers if ch.get("kind") == "food")
     n_sleep = sum(1 for ch in c3.chambers if ch.get("kind") == "sleep")
@@ -91,7 +94,8 @@ def smoke(ticks: int = 6000) -> None:
     assert rooms_with_food >= 2, f"phase10: food not distributed across rooms (n={rooms_with_food})"
     assert not det.alarms, f"phase12 detect: 蚂蚁扎堆/徘徊回归 {det.alarms}"
     print(
-        f"PHASE9 OK  rooms {len(c3.chambers)} (dyn {len(dyn)})  far_dyn {far_dyn:.0f}  pop {c3.population}  "
+        f"PHASE9 OK  rooms {len(c3.chambers)} (dyn {len(dyn)}, linked {linked}, 施工中 {in_progress})  "
+        f"far_dyn {far_dyn:.0f}  pop {c3.population}  "
         f"food_rooms {n_food}(峰值{rooms_with_food}有粮,存粮峰{food_peak:.0f})  sleep_rooms {n_sleep}  "
         f"detect clean"
     )

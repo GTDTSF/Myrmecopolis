@@ -6,7 +6,7 @@ sys.path.insert(0, "src")
 from myrmecopolis.world import World
 from myrmecopolis.constants import TUNNEL, DIRT, SURFACE, W, H
 
-T = 150000
+T = int(sys.argv[1]) if len(sys.argv) > 1 else 150000
 w = World(seed=5)
 for _ in range(T):
     w.tick()
@@ -60,8 +60,10 @@ for cx, cy in ((col.qx, col.qy),):
         rows[cy][cx] = QUEEN
 ey = SURFACE
 if 0 <= ey < H:
-    rows[ey - 1][col.qx] = ENTRY
-    rows[ey][col.qx] = ENTRY
+    for e in col.entrances:
+        if e.get("open") and 0 <= e["x"] < W:
+            rows[ey - 1][e["x"]] = ENTRY
+            rows[ey][e["x"]] = ENTRY
 
 
 def write_png(path, scale):

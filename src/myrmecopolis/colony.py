@@ -18,17 +18,16 @@ class Colony:
         self.queen_resting = False  # 阶段7.2：蚁后睡眠状态（睡时暂停产卵）
         self.queen_rest_t = QUEEN_WAKE  # 蚁后睡/醒周期计时（到 0 切换状态）
         self.sleep_rooms: list = []  # 阶段10：多个睡室（每 tick 按 kind=sleep 重算）
-        self.sleep_occ: list = []    # 阶段12：各睡室当前占用数（每 tick 重算）
-        self.sleep_inbound: list = []  # 阶段12：各睡室在途认领数（每 tick 重算；蚁认领时即时 +1）
-        self.sleep_target = None  # 阶段10：休息目标睡室（占用最少→强制均分到不同房）
+        self.sleep_occ: list = []    # 阶段30z-3：各睡室正在睡的蚁数（resting；每 tick 重算）
+        self.sleep_inbound: list = []  # 阶段30z-3：各睡室在途的疲劳蚁数（已认领、未开睡；每 tick 重算）
+        self.sleep_cap: list = []  # 阶段30z-3：各睡室可用格数——按容量比例分摊睡蚁（强制打散）
+        self.sleep_target = None  # 阶段10：休息目标睡室（负载比例最低→强制均分到不同房）
         self.sleep_ready = False  # 目标睡室已挖出可用面积（≥20 格）——没挖出来前疲劳蚁不转向去（防开井期罢工）
         self.brood_room: dict | None = None  # 阶段11：育虫室（kind=brood，每 tick 重算；卵的最终去处）
         self.food_rooms: list = []  # 阶段10：多个储粮室（kind=food，ch["store"] 记各房存粮）
-        self.food_target = None  # 阶段10：搬运目标粮室（最空→食物强制均分）
-        self.party_room: dict | None = None  # 阶段16：饭店（kind=party，每 tick 重算；有余粮时在此开派对）
-        self.party_t = 0    # 阶段16：当前派对剩余 tick（0=没在开派对）
-        self.party_cd = 0   # 阶段16：距下一场派对的最短间隔倒计时
-        self.party_n = 0    # 阶段16：当前派对蚁数（耗粮按此值成正比；供前端显示）
+        # 阶段30x：全群唯一 food_target 已删除，载体按 _carrier_room 每蚁分仓。
+        self.food_ready: list = []  # 阶段30t：已就绪粮室（linked + 挖出 ≥FOOD_ROOM_READY 格）
+        self.food_fill = 0.0  # 阶段30t：存粮/就绪仓容（满载→多派建造蚁，见 ROLE_BUILD_FULL）
         self.start_store = 0.0  # 开局储备粮（粮室接通前由它供粮，先消耗）
         self.food_gained = 0.0
         self.surface_open = False
@@ -46,8 +45,18 @@ class Colony:
         self.shaft_x1 = qx + 1
         self.nest_cells: set[int] = set()  # 标记的蚁穴格索引（受维护保护、免土壤回填）
         self.collapsed: list[int] = []     # 塌陷（变回土）的蚁穴格，维护蚁修复目标
+        self.reachable_collapsed: list[int] = []  # 阶段25：其中位于已连通房内的（可达），维护蚁只修这些
+        self.maint_mci: dict = {}  # 阶段29：每 tick 的 1:1 分派 {id(ant): mci}（无活干的维护蚁不在其中→待命槽位）
+        self.sleep_claimable: list[int] = []  # 阶段30：可认领睡室下标（已连通+已挖出可用面积）
+        self.sleep_ui: list = []  # 阶段30u：前端 Zz 标记只画已就绪睡室 [cx,cy,rx,ry]
         self.n_maintainers = 0
         self.break_digs: list = []  # 阶段9：突破蚁可挖前沿格（挖穿区内的土且邻隧道），每 tick 重算
+        self.break_tgt: dict | None = None  # 阶段30k：本 tick 突破目标（缓存：_in_break_area 每格调用）
+        self.dig_targets: list = []  # 阶段30x：本 tick 全部待填房（builder 按 max_age 分流，防挤同一前沿）
+        self.expand_cd = 0  # 阶段30z：地图放不下下一间房时的重试冷却（不限制房数）
+        self.nest_mask = None  # 阶段30z：巢区（房椭圆∪走廊）O(1) 掩码，房数无上限时避免每格扫所有房
+        self.nest_dirty = True
+        self.brood_ready = False  # 阶段30k：育虫室就绪（中心格已挖+容量≥20），就绪才允许工蚁捡卵
 
     def home_cell(self, x: int, y: int) -> bool:
         return max(abs(x - self.qx), abs(y - self.qy)) <= 5

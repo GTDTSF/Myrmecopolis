@@ -49,9 +49,12 @@ class Detector:
 
     @staticmethod
     def _busy(a) -> bool:
-        # 合法的"原地"活动：歇脚 / 挖 / 维护 / 破墙 / 搬运（粮或卵）——都不是徘徊
+        # 合法的"原地"活动：歇脚 / 挖 / 维护 / 破墙 / 搬运（粮或卵）/ 等睡眠出发
+        # （阶段30g：疲劳满后先等 sleep_wait≤599t 错峰再回睡室，等待期无活可干就站着——
+        # 有界等待不是卡死；睡室真不可达时等待到期后仍会空转→照样报警）
         return (a.resting or a.building or a.maintaining or a.breaking
-                or a.food or a.egg is not None)
+                or a.food or a.egg is not None
+                or (a.tired and a.sleep_wait > 0))
 
     def _wanderers(self, w) -> list:
         out = []

@@ -16,31 +16,39 @@
 </style>
 </head>
 <body>
-<h1>蚂蚁精灵草图 — 侧视剖面 · 8 方向</h1>
-<p class="note">视图为水平剖面（y=深度）。蚂蚁身体朝向移动方向：水平=行走，竖直=攀爬，斜=45°。腹为阵营色（橙群/蓝群），结构按真实解剖：头·中躯·细腰·腹、膝状触角、上颚、6 足。兵蚁：头宽大色浅、镰刀状大上颚、深橙足。</p>
+<h1>蚂蚁精灵草图 — 侧视剖面 · 部位级建模（阶段27）</h1>
+<p class="note">代码层面每个部位是独立命名部位（ants.js 的 workerParts/soldierParts/queenParts：部位 = 命名矩形组，各部位独立配色/几何，身体 = 有序部位表）。从后到前：腹（按类配色）→ 细腰（最深色缢缩）→ 中躯 → [颈缝] → 头（复眼）→ 上颚（浅色几丁质钳）→ 膝状触角 → 六足。**叼粮 = 屏幕层画的"粮仓同款颗粒"**（半径/颜色/描边与粮仓储量完全一致，比琥珀方块更黄更大），锚点由 `MOUTH_OFFSET`（上颚部位包围盒中心）导出、随蚂蚁朝向旋转——几何改了粮粒自动跟着嘴走。视图为水平剖面（y=深度），身体朝向移动方向：水平=行走，竖直=攀爬，斜=45°。</p>
 
-<h2>工蚁 A（橙）· 8 方向</h2>
+<h2>部位拆解（工蚁，后→前）</h2>
+<div class="grid" id="parts"></div>
+
+<h2>工蚁 · 觅食（橙）· 8 方向</h2>
 <div class="grid" id="w0"></div>
-<h2>工蚁 A（橙）· 携带食物</h2>
+<h2>工蚁 · 携带食物（粮夹在上颚）</h2>
 <div class="grid" id="wc0"></div>
-<h2>工蚁 B（蓝）· 8 方向</h2>
+<h2>工蚁 · 建造（蓝）</h2>
 <div class="grid" id="w1"></div>
-<h2>兵蚁 A（橙）· 8 方向</h2>
+<h2>工蚁 · 维护（绿）</h2>
+<div class="grid" id="w2"></div>
+<h2>兵蚁 · 8 方向</h2>
 <div class="grid" id="s0"></div>
-<h2>兵蚁 B（蓝）· 8 方向</h2>
-<div class="grid" id="s1"></div>
+
 <h2>游戏内实际尺寸（S=8，每格 8px）</h2>
 <canvas id="live" width="720" height="160"></canvas>
 
 <script src="ants.js"></script>
 <script>
 initAnts();
-function row(id,caste,colony,carrying,zoom){
+function drawFood(g){ // 粮仓同款颗粒（画在已变换的精灵坐标系里）
+  g.fillStyle="rgb(237,196,69)";
+  g.beginPath();g.arc(MOUTH_OFFSET[0],MOUTH_OFFSET[1],4,0,Math.PI*2);g.fill();
+  g.strokeStyle="rgba(96,64,18,0.6)";g.lineWidth=0.5;g.stroke();
+}
+function row(id,base,carrying,zoom){
   const box=document.getElementById(id);
   for(let d=0;d<8;d++){
     const t=document.createElement("div");t.className="tile";
     const cv=document.createElement("canvas");
-    const base=(caste==="soldier"?SPRITES.soldier[colony].move:SPRITES.worker[colony][carrying?"carry":"move"]);
     const B=(base.width+base.height)*zoom;
     cv.width=cv.height=B;
     const g=cv.getContext("2d");
@@ -49,32 +57,60 @@ function row(id,caste,colony,carrying,zoom){
     g.rotate(AANG[d]);
     g.scale(zoom,zoom);
     g.drawImage(base,-base.width/2,-base.height/2);
+    if(carrying)drawFood(g);
     const lb=document.createElement("div");lb.textContent=ADIR_NAMES[d];
     t.appendChild(cv);t.appendChild(lb);box.appendChild(t);
   }
 }
-row("w0","worker",0,false,4);
-row("wc0","worker",0,true,4);
-row("w1","worker",1,false,4);
-row("s0","soldier",0,false,4);
-row("s1","soldier",1,false,4);
+// 部位拆解：workerParts(0) 每个部位单独渲染（4x 放大）
+const PN={gaster:"腹 gaster（按类配色）",petiole:"细腰 petiole（缢缩）",meso:"中躯 meso（胸）",head:"头 head",eye:"复眼 eye",mandible:"上颚 mandible（口缝）",antenna:"触角 antenna（膝状）",legs:"六足 legs"};
+{
+  const PT=workerParts(0),box=document.getElementById("parts");
+  for(const k of Object.keys(PN)){
+    const t=document.createElement("div");t.className="tile";
+    const cv=document.createElement("canvas");cv.width=120;cv.height=56;
+    const g=cv.getContext("2d");g.imageSmoothingEnabled=false;g.scale(4,4);
+    for(const r of PT[k]){g.fillStyle=r[4];g.fillRect(r[0],r[1],r[2],r[3]);}
+    const lb=document.createElement("div");lb.textContent=PN[k];
+    t.appendChild(cv);t.appendChild(lb);box.appendChild(t);
+  }
+  const t=document.createElement("div");t.className="tile";
+  const cv=document.createElement("canvas");cv.width=120;cv.height=56;
+  const g=cv.getContext("2d");g.imageSmoothingEnabled=false;g.scale(4,4);
+  stamp(cv,workerRects(0));
+  const lb=document.createElement("div");lb.textContent="全蚁（移动态）";
+  t.appendChild(cv);t.appendChild(lb);box.appendChild(t);
+  const t2=document.createElement("div");t2.className="tile";
+  const cv2=document.createElement("canvas");cv2.width=120;cv2.height=56;
+  const g2=cv2.getContext("2d");g2.imageSmoothingEnabled=false;g2.scale(4,4);
+  stamp(cv2,workerRects(0));drawFood(g2);
+  const lb2=document.createElement("div");lb2.textContent="全蚁（携带态，粮=粮仓同款）";
+  t2.appendChild(cv2);t2.appendChild(lb2);box.appendChild(t2);
+}
+row("w0",SPRITES.worker[0][0].move,false,4);
+row("wc0",SPRITES.worker[0][0].carry,true,4);
+row("w1",SPRITES.worker[0][1].move,false,4);
+row("w2",SPRITES.worker[0][2].move,false,4);
+row("s0",SPRITES.soldier[0].move,false,4);
 
-// 实际尺寸演示：S=8 格上行走的工蚁 + 竖井攀爬 + 兵蚁
+// 实际尺寸演示：S=8 格上行走的工蚁 + 竖井攀爬 + 携带 + 兵蚁
 const g=document.getElementById("live").getContext("2d");
 g.imageSmoothingEnabled=false;
-for(let i=0;i<8;i++){ // 走 8 个方向
+for(let i=0;i<8;i++){
   const cx=60+i*90, cy=50;
   g.strokeStyle="#55402a";g.strokeRect(cx-32,14,64,64);
-  drawAnt(g,cx,cy,"worker",0,false,AANG[i]);
+  drawAnt(g,cx,cy,"worker",0,false,AANG[i],1,0);
 }
-// 竖井里上下爬
 g.strokeStyle="#55402a";g.strokeRect(24,96,56,56);g.strokeRect(88,96,56,56);
-drawAnt(g,52,124,"worker",1,false,1);
-drawAnt(g,116,124,"worker",1,false,3);
-// 携带 + 兵蚁
-drawAnt(g,220,124,"worker",0,true,2);
-drawAnt(g,330,124,"soldier",0,false,2);
-drawAnt(g,440,124,"soldier",1,false,7);
+drawAnt(g,52,124,"worker",0,false,1,1,0);
+drawAnt(g,116,124,"worker",0,false,3,1,1);
+drawAnt(g,220,124,"worker",0,true,2,1,0);
+{ // 携带蚁的粮粒（粮仓同款，S=8 时 gr=3），朝右：嘴锚点 (13,0)
+  g.fillStyle="rgb(237,196,69)";g.beginPath();g.arc(220+MOUTH_OFFSET[0],124+MOUTH_OFFSET[1],3,0,Math.PI*2);g.fill();
+  g.strokeStyle="rgba(96,64,18,0.6)";g.lineWidth=1;g.stroke();
+}
+drawAnt(g,330,124,"soldier",0,false,2,1,0);
+drawAnt(g,440,124,"soldier",0,false,7,1,0);
 </script>
 </body>
 </html>

@@ -56,92 +56,30 @@ function drawFalling(ff){
 }
 
 function drawPantry(fc){
-  // 阶段15b：每间粮室画成一堆"食物颗粒"（离散大圆点紧密堆积）——不是色块。
-  // fc 项 = [房中心cx,cy, 半径rx,ry, 存粮amt]；越满颗粒堆得越满、越亮。
-  for(const [cx,cy,rx,ry,amt] of fc){
+  // 阶段30u：逐格画粮——只在该粮室"已挖开"的格子（terrain==2）里放粮。
+  // 旧版在整块椭圆上铺颗粒：椭圆是规划房形，比实际洞体大得多（还可能压到土/走廊），
+  // 于是粮堆比粮仓还大、还会"出现在没挖开的土里"（用户反馈 1/3）。
+  // fc 项 = [房中心cx,cy, 半径rx,ry, 存粮amt, 仓容cap]；装载率决定多少格有粮（先填房心）。
+  if(!terrain)return;
+  for(const [cx,cy,rx,ry,amt,cap] of fc){
     if(amt<2)continue;
-    const px=(cx+0.5)*S, py=(cy+0.5)*S, ex=rx*S, ey=ry*S;
-    const k=Math.min(1,amt/1000);       // 满仓度（粮室通常存 1000-2000）
-    const gr=Math.max(4,S*0.5);         // 颗粒半径（≈半格，明显大于旧 1.5px 点）
-    const step=gr*1.9;
-    ctx.save();
-    for(let gy=-ey;gy<=ey;gy+=step){
-      for(let gx=-ex;gx<=ex;gx+=step){
-        const q=(h=>h-Math.floor(h))(Math.sin(cx*12.9898+cy*78.233+(gx*0.71+gy*0.13))*43758.5453); // 确定性伪随机（逐帧稳定）
-        const X=gx+(q-0.5)*step*0.55, Y=gy+((q*7%1)-0.5)*step*0.55;
-        const rn=Math.sqrt((X*X)/(ex*ex)+(Y*Y)/(ey*ey));
-        if(rn>1)continue;                 // 椭圆外不画
-        if(rn>0.36+0.64*k)continue;       // 越空只在中心留一小堆
-        const rr=gr*(0.85+0.3*(q*13%1));
+    const k=Math.min(1,amt/Math.max(1,cap||1));
+    const gr=Math.max(2,S*0.30);
+    for(let gy=Math.ceil(cy-ry);gy<=cy+ry;gy++){
+      for(let gx=Math.ceil(cx-rx);gx<=cx+rx;gx++){
+        if(gx<0||gx>=W||gy<0||gy>=H)continue;
+        const rn=Math.sqrt(((gx-cx)**2)/(rx*rx)+((gy-cy)**2)/(ry*ry));
+        if(rn>1)continue;
+        if(terrain[gy*W+gx]!==2)continue;            // 没挖开的土/岩不画粮
+        const q=(h=>h-Math.floor(h))(Math.sin(gx*12.9898+gy*78.233)*43758.5453); // 确定性伪随机
+        if(rn>0.20+0.80*Math.sqrt(k))continue;        // 越满填得越靠外
+        const px=(gx+0.5+(q-0.5)*0.45)*S, py=(gy+0.5+((q*7%1)-0.5)*0.45)*S;
         ctx.fillStyle=`rgb(${(224+26*q)|0},${(178+36*q)|0},${(58+22*q)|0})`;
-        ctx.beginPath();ctx.arc(px+X,py+Y,rr,0,Math.PI*2);ctx.fill();
-        ctx.strokeStyle="rgba(96,64,18,0.6)";ctx.lineWidth=1;ctx.stroke();  // 深边=颗粒边界
+        ctx.beginPath();ctx.arc(px,py,gr*(0.85+0.3*(q*13%1)),0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle="rgba(96,64,18,0.6)";ctx.lineWidth=1;ctx.stroke();
       }
     }
-    ctx.restore();
   }
-}
-
-function drawRestaurant(pr, pt, pn){
-  // 阶段16：蚂蚁饭店——暖色地板 + 圆餐桌（每桌一盘小食）+ 挂灯 + 招牌；
-  // 有余粮时（pt>0）开派对：暖光脉动 + 三角彩旗 + 撒花 + 飘升音符。
-  // 位置全由房中心/半径与索引派生（无随机、跨帧稳定），动画用 performance.now()。
-  if(!pr||pr.length<4)return;
-  const [cx,cy,rx,ry]=pr, ex=rx*S, ey=ry*S, t=performance.now()/1000;
-  ctx.save();ctx.translate((cx+0.5)*S,(cy+0.5)*S);
-  const fg=ctx.createRadialGradient(0,-ey*0.25,ey*0.15,0,0,ex); // 暖木地板
-  fg.addColorStop(0,"#7c5731");fg.addColorStop(1,"#523a1f");
-  ctx.beginPath();ctx.ellipse(0,0,ex*0.95,ey*0.95,0,0,Math.PI*2);ctx.fillStyle=fg;ctx.fill();
-  ctx.lineWidth=2;ctx.strokeStyle="rgba(38,24,11,0.65)";ctx.stroke();
-  const tn=Math.max(2,Math.min(4,Math.round(rx/3))); // 圆餐桌
-  for(let i=0;i<tn;i++){
-    const tx=(-0.55+1.1*(tn===1?0.5:i/(tn-1)))*ex*0.8, ty=Math.sin(i*1.9)*ey*0.22;
-    const tr=Math.min(ex,ey)*0.24;
-    ctx.fillStyle="#8a5a2b";ctx.beginPath();ctx.ellipse(tx,ty+tr*0.35,tr*0.55,tr*0.3,0,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#a5713a";ctx.beginPath();ctx.ellipse(tx,ty,tr,tr*0.72,0,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#f2e6c0";ctx.beginPath();ctx.ellipse(tx,ty-tr*0.12,tr*0.42,tr*0.3,0,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#e0a13c";ctx.beginPath();ctx.arc(tx,ty-tr*0.12,tr*0.15,0,Math.PI*2);ctx.fill();
-  }
-  ctx.strokeStyle="rgba(60,40,20,0.5)";ctx.lineWidth=1; // 挂灯串
-  ctx.beginPath();ctx.moveTo(-ex*0.75,-ey*0.68);ctx.quadraticCurveTo(0,-ey*0.9,ex*0.75,-ey*0.68);ctx.stroke();
-  const cols=["#ff6b6b","#ffd93d","#6bcB77","#4d96ff","#ff8ad8"];
-  for(let i=0;i<=6;i++){
-    const u=i/6;
-    ctx.fillStyle=cols[i%cols.length];ctx.globalAlpha=pt>0?1:0.7;
-    ctx.beginPath();ctx.arc(-ex*0.75+u*ex*1.5,-ey*0.68-0.22*ey*(4*u*(1-u))+3,2.6,0,Math.PI*2);ctx.fill();
-  }
-  ctx.globalAlpha=1;
-  ctx.fillStyle="rgba(255,236,180,0.9)";ctx.font="bold 12px monospace";ctx.textAlign="center";
-  ctx.fillText(pt>0&&pn?"饭店 "+pn:"饭店",0,-ey-6); // 派对时报到场蚁数（耗粮与之成正比）
-  if(pt>0){
-    const g=ctx.createRadialGradient(0,0,ey*0.1,0,0,ex*1.25); // 暖光脉动
-    g.addColorStop(0,`rgba(255,214,120,${(0.3+0.18*Math.sin(t*6)).toFixed(3)})`);
-    g.addColorStop(1,"rgba(255,214,120,0)");
-    ctx.fillStyle=g;ctx.beginPath();ctx.ellipse(0,0,ex*1.3,ey*1.3,0,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#ff5a7a";ctx.globalAlpha=0.9;ctx.beginPath(); // 三角彩旗
-    for(let i=0;i<=8;i++){
-      const u=i/8, xb=-ex*0.85+u*ex*1.7, yb=-ey*0.5-0.3*ey*(4*u*(1-u));
-      ctx.moveTo(xb-4,yb);ctx.lineTo(xb+4,yb);ctx.lineTo(xb,yb+7);ctx.closePath();
-    }
-    ctx.fill();ctx.globalAlpha=1;
-    const cc=["#ff5a5a","#ffd23f","#5ce08a","#5aa9ff","#ff8ad8","#f2f2f2"]; // 撒花
-    for(let i=0;i<30;i++){
-      const q=(h=>h-Math.floor(h))(Math.sin(i*127.1+cx*7.3+cy*3.1)*43758.5453);
-      const x0=(q-0.5)*ex*1.6, yy=((q*2)*ey*1.1+t*(26+q*70))%(ey*2.2)-ey*1.1;
-      if((x0*x0)/(ex*ex)+(yy*yy)/(ey*ey)>1.05)continue;
-      ctx.save();ctx.translate(x0,yy);ctx.rotate(t*4+q*7);
-      ctx.fillStyle=cc[(q*97|0)%cc.length];ctx.fillRect(-2.2,-1.2,4.4,2.4);
-      ctx.restore();
-    }
-    const notes=["♪","♫","♩"]; // 飘升音符
-    ctx.fillStyle="rgba(255,244,190,0.95)";ctx.font="bold 13px monospace";ctx.textAlign="center";
-    for(let i=0;i<3;i++){
-      const ph=(t*0.8+i*0.37)%1;
-      ctx.globalAlpha=1-ph;ctx.fillText(notes[i],(i-1)*ex*0.4,-ey*0.15-ph*ey*0.95);
-    }
-    ctx.globalAlpha=1;
-  }
-  ctx.restore();
 }
 
 function drawMounds(e){
@@ -167,18 +105,40 @@ function drawActors(a,l,q){
     }
   }
   const seen=new Set();
-  for(const [uid,x,y,c,st,caste,dir,maint,rest,sz,eat,pty] of a){
+  for(const [uid,x,y,c,st,caste,dir,maint,rest,sz,eat,bld] of a){
     seen.add(uid);
+    // 阶段21：三类工蚁按颜色区分（0=觅食橙 / 1=建造蓝 / 2=维护绿）
+    const role=maint?2:(bld?1:0);
     const tgt=AANG[dir];
-    let cur=angState.get(uid);
-    if(cur===undefined)cur=tgt;
-    let d=tgt-cur;
+    let s=angState.get(uid);
+    if(s===undefined)s={a:tgt,x:x,y:y,lx:x,ly:y};
+    // 阶段25f：蚁本帧没移动（实际格子位置不变）→不更新显示朝向，消除原地视觉转圈
+    // （后端 a.d 每 tick 重选→tgt 变→精灵原地打转；纯前端插值，不碰后端行为，smoke 不受影响）
+    const moved=(x!==s.lx||y!==s.ly);
+    s.lx=x;s.ly=y;
+    let d=tgt-s.a;
     while(d>Math.PI)d-=2*Math.PI;
     while(d<-Math.PI)d+=2*Math.PI;
-    cur+=d*0.15; // 指数趋近放慢（约 0.4s）：方向逐 tick 微调时朝向平滑过渡、不逐帧追抖（用户"反复抽搐"）
-    angState.set(uid,cur);
-    const bob=pty?Math.sin(performance.now()/150+uid*0.7)*2.2:0; // 阶段16：派对蚁蹦跳
-    drawAnt(ctx,(x+0.5)*S,(y+0.5)*S+bob,caste===1?"soldier":"worker",c,st===1,cur,sz);
+    // 用户 m1231：蚂蚁"只能前进，前进前先转向"——显示位姿原地转身，转得差不多才迈步（位移按
+    // 朝向对齐度放行），避免"一边平移一边扭头"的抽搐。纯前端插值，不改后端行为。
+    if(moved)s.a+=d*0.35;
+    // 阶段30z-3：无条件插值（至少 0.25）——后端一步可转 >69°，旧式 align=0 时显示格不动，
+    // 但 s.lx 已更新→下一帧 moved=false→朝向也不再更新，精灵永久冻在旧格（用户所见“各种蚂蚁卡死”）。
+    const align=Math.max(0,1-Math.abs(d)/1.2);
+    const k=Math.min(1,0.25+align*0.65);
+    s.x+=(x-s.x)*k;s.y+=(y-s.y)*k;
+    angState.set(uid,s);
+    drawAnt(ctx,(s.x+0.5)*S,(s.y+0.5)*S,caste===1?"soldier":"worker",c,st===1,s.a,sz,role);
+    if(st===1&&caste!==1){
+      // 阶段28：叼粮=与粮仓储量同款颗粒（drawPantry 中位数：半径 gr、色 rgb(237,196,69)、深边描边），
+      // 锚定嘴部位中心 MOUTH_OFFSET（ants.js 由上颚包围盒导出，几何改了自动跟随），随朝向 s.a 旋转
+      const m=ANT_SCALE*sz,dx=MOUTH_OFFSET[0],dy=MOUTH_OFFSET[1];
+      const fx=(s.x+0.5)*S+(Math.cos(s.a)*dx-Math.sin(s.a)*dy)*m;
+      const fy=(s.y+0.5)*S+(Math.sin(s.a)*dx+Math.cos(s.a)*dy)*m;
+      ctx.fillStyle="rgb(237,196,69)";
+      ctx.beginPath();ctx.arc(fx,fy,Math.max(2,S*0.30),0,Math.PI*2);ctx.fill(); // 阶段30u：与粮堆同款粒度
+      ctx.strokeStyle="rgba(96,64,18,0.6)";ctx.lineWidth=1;ctx.stroke();
+    }
     if(rest){ // 休息蚁：zzz 睡眠特效（干累了回蚁巢歇脚）
       const ph=performance.now()/550 + uid*0.7;
       ctx.save();
@@ -204,30 +164,6 @@ function drawActors(a,l,q){
         ctx.arc(Math.sin(t*1.3)*5, -4 - i*3.2, 2.4, 0, Math.PI*2);
         ctx.fill();
       }
-      ctx.restore();
-    }
-    if(maint){ // 维护蚁：绿色光环（定期巡查蚁穴、修复塌陷巢格）
-      ctx.save();
-      ctx.translate((x+0.5)*S,(y+0.5)*S);
-      ctx.strokeStyle="rgba(110,220,120,0.85)";
-      ctx.lineWidth=2;
-      ctx.beginPath();
-      ctx.arc(0,0,13,0,Math.PI*2);
-      ctx.stroke();
-      ctx.restore();
-    }
-    if(pty){ // 阶段16：派对蚁——头顶彩点（撒花/欢呼）
-      const ph=performance.now()/220+uid*1.3;
-      const pcols=["#ff5a5a","#ffd23f","#5ce08a","#5aa9ff","#ff8ad8"];
-      ctx.save();
-      ctx.translate((x+0.5)*S,(y+0.5)*S);
-      for(let i=0;i<3;i++){
-        const a2=ph+i*2.1;
-        ctx.globalAlpha=0.5+0.5*Math.sin(a2);
-        ctx.fillStyle=pcols[(uid+i)%pcols.length];
-        ctx.beginPath();ctx.arc(Math.cos(a2)*(6+i), -9-i*2+Math.sin(a2)*2, 2, 0, Math.PI*2);ctx.fill();
-      }
-      ctx.globalAlpha=1;
       ctx.restore();
     }
   }
@@ -256,21 +192,6 @@ function drawDaylight(p){ // 昼夜渐变：p 0-1，0=白昼最亮、0.5=深夜�
   }
 }
 
-function drawSleepRoom(sr){ // 阶段10：多睡室标记（虚线椭圆 + Zz），蚂蚁在此歇脚（不睡蚁后主厅）
-  if(!sr)return;
-  for(const [cx,cy,rx,ry] of sr){
-    ctx.save();
-    ctx.translate((cx+0.5)*S,(cy+0.5)*S);
-    ctx.strokeStyle="rgba(150,140,220,0.4)";
-    ctx.lineWidth=1.5;ctx.setLineDash([3,3]);
-    ctx.beginPath();ctx.ellipse(0,0,rx*S,ry*S,0,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
-    ctx.fillStyle="rgba(205,190,255,0.85)";
-    ctx.font="bold 12px monospace";ctx.textAlign="center";
-    ctx.fillText("Zz",0,-ry*S-4);
-    ctx.restore();
-  }
-}
-
 function drawHud(s){
   hud.innerHTML=`<span class="c0">蚁群 人口 ${s[0]} · 储粮 ${s[1]} · 幼体 ${s[2]} · 采食 ${s[3]}</span>`;
 }
@@ -287,9 +208,7 @@ new EventSource("/stream").onmessage=(e)=>{
   drawFalling(d.ff||[]);
   drawMounds(d.e||[[],[]]);
   drawPantry(d.fc||[]);
-  drawRestaurant(d.pr||[], d.pt||0, d.pn||0);
   drawActors(d.a,d.l,d.q);
-  drawSleepRoom(d.sr);
   drawDaylight(d.day||0);
   drawHud(d.s);
 };
